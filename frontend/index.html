@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Meta Ads Control Center</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232563eb'/><path d='M8 22 L12 10 L16 18 L20 10 L24 22' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Alpine.js -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <!-- Font Awesome 6 -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+
+  <!-- Inter Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="/static/css/styles.css?v=4" />
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+          colors: {
+            slate: {
+              850: '#172033',
+              925: '#0d1829',
+            }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans antialiased" style="background: linear-gradient(135deg, #0a1628 0%, #0f172a 40%, #0d1f3c 100%); min-height: 100vh;">
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!--  MAIN APPLICATION                                                          -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div id="app" x-data="App" class="flex h-screen">
+
+  <!-- ── MOBILE SIDEBAR OVERLAY ─────────────────────────────────────────── -->
+  <div
+    x-show="sidebarOpen && isMobile"
+    x-transition:enter="transition-opacity ease-out duration-300"
+    x-transition:enter-start="opacity-0"
+    x-transition:enter-end="opacity-100"
+    x-transition:leave="transition-opacity ease-in duration-200"
+    x-transition:leave-start="opacity-100"
+    x-transition:leave-end="opacity-0"
+    @click="sidebarOpen = false"
+    class="fixed inset-0 z-20 bg-black/60 backdrop-blur-sm lg:hidden"
+    style="display: none;"
+  ></div>
+
+  <!-- ── SIDEBAR ─────────────────────────────────────────────────────────── -->
+  <aside
+    :class="[
+      sidebarCollapsed ? 'w-[68px]' : 'w-64',
+      sidebarOpen || !isMobile ? 'translate-x-0' : '-translate-x-full'
+    ]"
+    class="fixed lg:relative z-30 flex flex-col h-full transition-all duration-300 ease-in-out"
+    style="background: rgba(15,23,42,0.97); backdrop-filter: blur(24px); border-right: 1px solid rgba(51,65,85,0.5);"
+  >
+    <!-- Logo -->
+    <div class="flex items-center gap-3 p-4 flex-shrink-0" style="border-bottom: 1px solid rgba(51,65,85,0.4); min-height: 64px;">
+      <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #2563eb, #3b82f6); box-shadow: 0 4px 16px rgba(59,130,246,0.4);">
+        <i class="fas fa-chart-line text-white text-sm"></i>
+      </div>
+      <div x-show="!sidebarCollapsed" x-transition:enter="transition-opacity duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100">
+        <p class="text-white font-bold text-sm leading-tight whitespace-nowrap">Meta Ads</p>
+        <p class="text-blue-400 text-xs font-medium whitespace-nowrap">Control Center</p>
+      </div>
+    </div>
+
+    <!-- Nav Items -->
+    <nav class="flex-1 p-2 overflow-y-auto overflow-x-hidden mt-1">
+      <!-- Group: main -->
+      <div x-show="!sidebarCollapsed" class="px-2 py-1.5 mt-1 mb-0.5">
+        <p class="text-slate-600 text-xs font-semibold uppercase tracking-widest">Visão Geral</p>
+      </div>
+      <template x-for="item in navItems.filter(n=>n.group==='main')" :key="item.id">
+        <button
+          @click="navigate(item.id)"
+          :class="currentPage === item.id
+            ? 'bg-blue-600/20 text-blue-400 border-blue-500/30'
+            : 'text-slate-500 hover:bg-slate-800/60 hover:text-slate-300 border-transparent'"
+          class="sidebar-item relative group"
+          :title="sidebarCollapsed ? item.label : ''"
+        >
+          <i :class="item.icon + ' icon text-base'" style="min-width:18px;"></i>
+          <span x-show="!sidebarCollapsed" class="text-sm font-medium whitespace-nowrap transition-all" x-text="item.label"></span>
+        </button>
+      </template>
+
+      <!-- Group: AI -->
+      <div x-show="!sidebarCollapsed" class="px-2 py-1.5 mt-3 mb-0.5">
+        <p class="text-xs font-semibold uppercase tracking-widest" style="color:#3b82f6aa;">Gestor IA</p>
+      </div>
+      <div x-show="sidebarCollapsed" class="my-1.5 mx-2 border-t border-slate-700/50"></div>
+      <template x-for="item in navItems.filter(n=>n.group==='ai')" :key="item.id">
+        <button
+          @click="navigate(item.id)"
+          :class="currentPage === item.id
+            ? 'bg-blue-600/20 text-blue-400 border-blue-500/30'
+            : 'text-slate-500 hover:bg-slate-800/60 hover:text-slate-300 border-transparent'"
+          class="sidebar-item relative group"
+          :title="sidebarCollapsed ? item.label : ''"
+        >
+          <i :class="item.icon + ' icon text-base'" style="min-width:18px;"></i>
+          <span x-show="!sidebarCollapsed" class="text-sm font-medium whitespace-nowrap transition-all flex-1" x-text="item.label"></span>
+          <span x-show="item.badge && !sidebarCollapsed" class="text-xs font-bold px-1.5 py-0.5 rounded-md ml-auto" style="background:rgba(59,130,246,0.2);color:#60a5fa;font-size:9px;" x-text="item.badge"></span>
+        </button>
+      </template>
+
+      <!-- Group: management -->
+      <div x-show="!sidebarCollapsed" class="px-2 py-1.5 mt-3 mb-0.5">
+        <p class="text-slate-600 text-xs font-semibold uppercase tracking-widest">Gestão</p>
+      </div>
+      <div x-show="sidebarCollapsed" class="my-1.5 mx-2 border-t border-slate-700/50"></div>
+      <template x-for="item in navItems.filter(n=>n.group==='management')" :key="item.id">
+        <button
+          @click="navigate(item.id)"
+          :class="currentPage === item.id
+            ? 'bg-blue-600/20 text-blue-400 border-blue-500/30'
+            : 'text-slate-500 hover:bg-slate-800/60 hover:text-slate-300 border-transparent'"
+          class="sidebar-item relative group"
+          :title="sidebarCollapsed ? item.label : ''"
+        >
+          <i :class="item.icon + ' icon text-base'" style="min-width:18px;"></i>
+          <span x-show="!sidebarCollapsed" class="text-sm font-medium whitespace-nowrap transition-all" x-text="item.label"></span>
+          <!-- Alert badge (expanded) -->
+          <span
+            x-show="item.id === 'alerts' && alertCount > 0 && !sidebarCollapsed"
+            x-text="alertCount"
+            class="ml-auto text-xs font-bold bg-red-500 text-white rounded-full flex items-center justify-center"
+            style="min-width:20px; height:20px; padding:0 4px;"
+          ></span>
+          <!-- Alert dot (collapsed) -->
+          <span
+            x-show="item.id === 'alerts' && alertCount > 0 && sidebarCollapsed"
+            class="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full pulse-dot"
+          ></span>
+        </button>
+      </template>
+    </nav>
+
+    <!-- Divider + Collapse button (desktop) -->
+    <div style="border-top: 1px solid rgba(51,65,85,0.4);">
+      <button
+        @click="sidebarCollapsed = !sidebarCollapsed"
+        class="hidden lg:flex w-full items-center justify-center p-3 text-slate-500 hover:text-slate-300 transition-colors"
+        :title="sidebarCollapsed ? 'Expandir sidebar' : 'Colapsar sidebar'"
+      >
+        <i :class="sidebarCollapsed ? 'fas fa-chevron-right' : 'fas fa-chevron-left'" class="text-xs"></i>
+      </button>
+    </div>
+  </aside>
+
+  <!-- ── MAIN AREA ────────────────────────────────────────────────────────── -->
+  <div class="flex-1 flex flex-col min-w-0 overflow-x-hidden">
+
+    <!-- ── HEADER ───────────────────────────────────────────────────────── -->
+    <header class="flex-shrink-0 px-4 py-3" style="position:sticky;top:0;z-index:50;background:rgba(15,23,42,0.9);backdrop-filter:blur(16px);border-bottom:1px solid rgba(51,65,85,0.4);min-height:64px;">
+      <div class="flex items-center justify-between h-full">
+        <!-- Left: Menu + Title -->
+        <div class="flex items-center gap-3">
+          <button @click="sidebarOpen = !sidebarOpen" class="lg:hidden p-2 text-slate-400 hover:text-white hover:bg-slate-800/60 rounded-lg transition-all">
+            <i class="fas fa-bars text-lg"></i>
+          </button>
+          <div>
+            <h1 class="text-white font-semibold text-base leading-tight" x-text="pageTitle"></h1>
+            <p class="text-slate-400 text-xs" x-text="pageSubtitle"></p>
+          </div>
+        </div>
+
+        <!-- Right: Actions -->
+        <div class="flex items-center gap-2">
+          <!-- Demo badge -->
+          <div x-show="$store.meta.demoMode" class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold" style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); color: #fbbf24;">
+            <i class="fas fa-flask text-xs"></i>
+            <span>Modo Demo</span>
+          </div>
+
+          <!-- Refresh -->
+          <button @click="refreshData()" :class="loading ? 'animate-spin' : ''" class="p-2 text-slate-400 hover:text-white hover:bg-slate-800/60 rounded-lg transition-all">
+            <i class="fas fa-rotate-right text-sm"></i>
+          </button>
+
+          <!-- Notifications -->
+          <div class="relative">
+            <button @click="notifOpen = !notifOpen" class="relative p-2 text-slate-400 hover:text-white hover:bg-slate-800/60 rounded-lg transition-all">
+              <i class="fas fa-bell text-lg"></i>
+              <span x-show="toastQueue.length > 0" x-text="toastQueue.length" class="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center" style="min-width:18px; height:18px; padding:0 3px;"></span>
+            </button>
+
+            <!-- Notification Panel -->
+            <div
+              x-show="notifOpen"
+              @click.outside="notifOpen = false"
+              x-transition:enter="transition ease-out duration-200"
+              x-transition:enter-start="opacity-0 scale-95"
+              x-transition:enter-end="opacity-100 scale-100"
+              x-transition:leave="transition ease-in duration-150"
+              x-transition:leave-start="opacity-100 scale-100"
+              x-transition:leave-end="opacity-0 scale-95"
+              class="absolute right-0 top-full mt-2 w-80 rounded-2xl shadow-2xl z-50"
+              style="background:#1e293b; border:1px solid rgba(51,65,85,0.8); display:none; origin: top right;"
+            >
+              <div class="flex items-center justify-between p-3 border-b" style="border-color:rgba(51,65,85,0.5);">
+                <h3 class="font-semibold text-white text-sm">Notificações</h3>
+                <button @click="notifLog = []; notifOpen = false" class="text-xs text-slate-400 hover:text-white transition-colors">Limpar</button>
+              </div>
+              <div class="max-h-72 overflow-y-auto">
+                <template x-if="notifLog.length === 0">
+                  <div class="p-6 text-center">
+                    <i class="fas fa-bell-slash text-slate-600 text-2xl mb-2"></i>
+                    <p class="text-slate-500 text-sm">Nenhuma notificação</p>
+                  </div>
+                </template>
+                <template x-for="n in notifLog.slice().reverse()" :key="n.id">
+                  <div class="flex items-start gap-3 p-3 hover:bg-slate-700/30 transition-colors border-b" style="border-color:rgba(51,65,85,0.3);">
+                    <div class="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5" :style="'background:' + n.bg">
+                      <i :class="n.icon + ' text-xs'" :style="'color:' + n.color"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm text-slate-200 leading-snug" x-text="n.message"></p>
+                      <p class="text-xs text-slate-500 mt-0.5" x-text="n.time"></p>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <!-- User -->
+          <button class="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold transition-all hover:ring-2 hover:ring-blue-500/50" style="background: linear-gradient(135deg, #2563eb, #7c3aed);">
+            U
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- ── PAGE CONTENT ──────────────────────────────────────────────────── -->
+    <main class="flex-1 overflow-y-auto" style="background: transparent;">
+      <div class="p-4 lg:p-6 max-w-[1600px] mx-auto">
+
+        <!-- DASHBOARD -->
+        <div x-show="currentPage === 'dashboard'" x-data="Dashboard" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- BUSINESS MANAGERS -->
+        <div x-show="currentPage === 'bm'" x-data="BmPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- ACCOUNTS -->
+        <div x-show="currentPage === 'accounts'" x-data="AccountsPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- PRODUCTS -->
+        <div x-show="currentPage === 'products'" x-data="ProductsPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- RULES -->
+        <div x-show="currentPage === 'rules'" x-data="RulesPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- ALERTS -->
+        <div x-show="currentPage === 'alerts'" x-data="AlertsPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- QUICK ACTIONS -->
+        <div x-show="currentPage === 'quickactions'" x-data="QuickActionsPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- REPORTS -->
+        <div x-show="currentPage === 'reports'" x-data="ReportsPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- SETTINGS -->
+        <div x-show="currentPage === 'settings'" x-data="SettingsPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- ── GESTOR IA PAGES ──────────────────────────────────────────────── -->
+
+        <!-- CAMPAIGNS (detailed) -->
+        <div x-show="currentPage === 'campaigns'" x-data="CampaignsPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- AI AGENT -->
+        <div x-show="currentPage === 'agent'" x-data="AgentPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- KNOWLEDGE BASE -->
+        <div x-show="currentPage === 'knowledge'" x-data="KnowledgePage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- CHAT -->
+        <div x-show="currentPage === 'chat'" x-data="ChatPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- IDEAS -->
+        <div x-show="currentPage === 'ideas'" x-data="IdeasPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- DEEP ANALYSIS -->
+        <div x-show="currentPage === 'analysis'" x-data="AnalysisPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- IMPORTAR — Google Sheets Sync + Campaign Launcher -->
+        <div x-show="currentPage === 'importar'" x-data="ImportarPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- MANUAL — Guia Completo da Plataforma -->
+        <div x-show="currentPage === 'manual'" x-data="ManualPage" class="h-full">
+          <div x-html="renderPage()"></div>
+        </div>
+
+      </div><!-- /max-w -->
+    </main><!-- /main -->
+  </div><!-- /main area -->
+
+  <!-- ══ MODALS LAYER ════════════════════════════════════════════════════ -->
+  <!-- Modals are rendered by each page component via Alpine magic -->
+
+  <!-- ══ TOAST NOTIFICATIONS ═════════════════════════════════════════════ -->
+  <div class="fixed top-4 right-4 z-[200] flex flex-col gap-2 pointer-events-none" style="max-width:360px;">
+    <template x-for="toast in toasts" :key="toast.id">
+      <div
+        x-show="toast.visible"
+        x-transition:enter="transition ease-out duration-300 transform"
+        x-transition:enter-start="translate-x-full opacity-0"
+        x-transition:enter-end="translate-x-0 opacity-100"
+        x-transition:leave="transition ease-in duration-200 transform"
+        x-transition:leave-start="translate-x-0 opacity-100"
+        x-transition:leave-end="translate-x-full opacity-0"
+        class="flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl pointer-events-auto"
+        :style="toast.style"
+      >
+        <div class="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" :style="toast.iconBg">
+          <i :class="toast.icon + ' text-xs'" :style="'color:' + toast.iconColor"></i>
+        </div>
+        <p class="text-sm font-medium text-white flex-1 leading-snug" x-text="toast.message"></p>
+        <button @click="removeToast(toast.id)" class="text-white/50 hover:text-white transition-colors flex-shrink-0 pointer-events-auto" style="min-width:20px;">
+          <i class="fas fa-times text-xs"></i>
+        </button>
+      </div>
+    </template>
+  </div>
+
+</div><!-- /app -->
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!--  SCRIPTS                                                                    -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<script src="/static/js/app.js?v=3"></script>
+<script src="/static/js/templates.js?v=3"></script>
+<script src="/static/js/agent.js?v=3"></script>
+<script src="/static/js/pages-launcher.js?v=1"></script>
+<script src="/static/js/pages-manual.js?v=1"></script>
+
+</body>
+</html>
