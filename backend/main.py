@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-import sqlite3
+import sqlite3, re as _re
 import anthropic
 import openai as openai_lib
 
@@ -27,6 +27,67 @@ _launch_threads: dict = {}
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "meta_ads.db")
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+
+# ─── PostgreSQL compatibility layer ────────────────────────────────────────────
+if DATABASE_URL:
+    import psycopg2, psycopg2.extras
+
+    class _PGRow(dict):
+        """Dict-based row that also supports integer indexing (like sqlite3.Row)."""
+        def __getitem__(self, key):
+            if isinstance(key, int):
+                return list(self.values())[key]
+            return super().__getitem__(key)
+
+    class _PGCursor:
+        def __init__(self, cur): self._cur = cur
+        def fetchone(self):
+            row = self._cur.fetchone()
+            return _PGRow(row) if row else None
+        def fetchall(self):
+            return [_PGRow(r) for r in (self._cur.fetchall() or [])]
+
+    class _PGConn:
+        def __init__(self, raw): self._conn = raw
+
+        @staticmethod
+        def _adapt(sql):
+            sql = sql.replace("?", "%s")
+            def _upsert(m):
+                table = m.group(1)
+                cols = [c.strip() for c in m.group(2).split(",")]
+                vals = m.group(3)
+                pk = cols[0]
+                updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols[1:])
+                return (f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({vals}) "
+                        f"ON CONFLICT ({pk}) DO UPDATE SET {updates}")
+            sql = _re.sub(
+                r"INSERT OR REPLACE INTO (\w+)\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)",
+                _upsert, sql, flags=_re.IGNORECASE)
+            return sql
+
+        def execute(self, sql, params=None):
+            sql = self._adapt(sql)
+            try:
+                cur = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute(sql, params or ())
+                return _PGCursor(cur)
+            except Exception:
+                self._conn.rollback()
+                raise
+
+        def executescript(self, sql):
+            cur = self._conn.cursor()
+            for stmt in [s.strip() for s in sql.split(";") if s.strip()]:
+                try:
+                    cur.execute(stmt)
+                    self._conn.commit()
+                except Exception:
+                    self._conn.rollback()
+
+        def commit(self): self._conn.commit()
+        def close(self): self._conn.close()
 META_API = "https://graph.facebook.com/v19.0"
 
 app = FastAPI(title="Meta Ads Control Center", version="2.0.0")
@@ -42,6 +103,8 @@ app.add_middleware(
 # ─── DATABASE ──────────────────────────────────────────────────────────────────
 
 def get_db():
+    if DATABASE_URL:
+        return _PGConn(psycopg2.connect(DATABASE_URL))
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
