@@ -138,6 +138,7 @@ const NAV = [
   { id:'analysis',     label:'Análise Profunda',  icon:'fas fa-magnifying-glass-chart', subtitle:'Gráficos e métricas avançadas', group:'ai' },
 
   // ── Gestão ──
+  { id:'connections',  label:'Conexões de API',   icon:'fas fa-plug',                  subtitle:'Tokens Meta e capacidades disponíveis', group:'management' },
   { id:'importar',     label:'Importar Produtos', icon:'fas fa-file-import',           subtitle:'Sync Google Sheets + lançar campanhas com 1 clique', group:'management', badge:'NOVO' },
   { id:'bm',           label:'Business Managers', icon:'fas fa-building',              subtitle:'Gerencie seus BMs conectados', group:'management' },
   { id:'accounts',     label:'Contas de Anúncio', icon:'fas fa-credit-card',           subtitle:'Todas as contas de anúncio', group:'management' },

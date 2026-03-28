@@ -285,6 +285,19 @@ def init_db():
             started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             completed_at TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS api_connections (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            token TEXT NOT NULL,
+            token_type TEXT DEFAULT 'full',
+            account_id TEXT DEFAULT '',
+            bm_id TEXT DEFAULT '',
+            user_name TEXT DEFAULT '',
+            user_id TEXT DEFAULT '',
+            capabilities TEXT DEFAULT '[]',
+            status TEXT DEFAULT 'active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
     """)
     conn.commit()
     # Migrations: add columns introduced after initial schema
@@ -1381,6 +1394,122 @@ def test_account_connection(data: dict):
     if token.startswith("demo") or token.startswith("test"):
         return {"status": "success", "message": "Modo demo — conexão simulada!"}
     return {"status": "error", "message": "Não foi possível verificar a conta. Verifique o token."}
+
+# ─── API Connections ──────────────────────────────────────────────────────────
+
+ALL_CAPS = ["identity", "campaigns_read", "insights_read", "campaigns_pause", "campaigns_activate", "budget_edit", "campaigns_create"]
+READ_CAPS = ["identity", "campaigns_read", "insights_read"]
+FULL_CAPS = ALL_CAPS[:]
+
+def _build_caps(token: str, account_id: str, token_type: str) -> tuple:
+    """Verify token and return (user_name, user_id, capabilities_list)."""
+    if token.startswith("demo") or token.startswith("test"):
+        caps = READ_CAPS if token_type == "readonly" else FULL_CAPS
+        return "Demo User", "demo_001", caps
+    me = meta_get("me", token, {"fields": "id,name"})
+    if "error" in me:
+        return None, None, []
+    user_name = me.get("name", "")
+    user_id = me.get("id", "")
+    caps = ["identity"]
+    if account_id:
+        camps = fetch_meta_campaigns(account_id, token)
+        if isinstance(camps, list):
+            caps += ["campaigns_read", "insights_read"]
+    else:
+        caps += ["campaigns_read", "insights_read"]
+    if token_type == "full":
+        caps += ["campaigns_pause", "campaigns_activate", "budget_edit", "campaigns_create"]
+    return user_name, user_id, caps
+
+@app.get("/api/connections")
+def list_connections():
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM api_connections ORDER BY created_at DESC").fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        d = dict(r)
+        tok = d.get("token", "")
+        d["token_masked"] = (tok[:6] + "..." + tok[-4:]) if len(tok) > 10 else "****"
+        del d["token"]
+        result.append(d)
+    return result
+
+@app.post("/api/connections/verify")
+def verify_connection(data: dict):
+    token = data.get("token", "")
+    account_id = data.get("account_id", "")
+    token_type = data.get("token_type", "full")
+    if not token:
+        return {"valid": False, "message": "Token não fornecido."}
+    user_name, user_id, caps = _build_caps(token, account_id, token_type)
+    if user_name is None:
+        return {"valid": False, "message": "Token inválido. Verifique o access token Meta."}
+    return {
+        "valid": True,
+        "user_name": user_name,
+        "user_id": user_id,
+        "capabilities": caps,
+        "message": f"Conectado como {user_name}!"
+    }
+
+@app.post("/api/connections")
+def add_connection(data: dict):
+    token = data.get("token", "")
+    if not token or not data.get("name"):
+        raise HTTPException(400, "name e token são obrigatórios")
+    verified = data.get("verified_data") or {}
+    user_name = verified.get("user_name", "")
+    user_id = verified.get("user_id", "")
+    caps = verified.get("capabilities", [])
+    if not caps:
+        u, uid, caps = _build_caps(token, data.get("account_id", ""), data.get("token_type", "full"))
+        user_name = u or ""
+        user_id = uid or ""
+    cid = str(uuid.uuid4())
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO api_connections (id, name, token, token_type, account_id, bm_id, user_name, user_id, capabilities) VALUES (?,?,?,?,?,?,?,?,?)",
+        (cid, data["name"], token, data.get("token_type", "full"),
+         data.get("account_id", ""), data.get("bm_id", ""),
+         user_name, user_id, json.dumps(caps))
+    )
+    conn.commit()
+    conn.close()
+    return {"id": cid, "status": "success", "message": "Conexão adicionada com sucesso!"}
+
+@app.delete("/api/connections/{conn_id}")
+def delete_connection(conn_id: str):
+    conn = get_db()
+    conn.execute("DELETE FROM api_connections WHERE id=?", (conn_id,))
+    conn.commit()
+    conn.close()
+    return {"status": "success"}
+
+@app.get("/api/connections/capabilities")
+def get_aggregate_capabilities():
+    """Returns aggregate of all capabilities across all connections."""
+    conn = get_db()
+    rows = conn.execute("SELECT capabilities, token_type FROM api_connections WHERE status='active'").fetchall()
+    conn.close()
+    caps = set()
+    has_full = False
+    has_readonly = False
+    for r in rows:
+        arr = json.loads(r["capabilities"] or "[]")
+        for c in arr:
+            caps.add(c)
+        if r["token_type"] == "full":
+            has_full = True
+        else:
+            has_readonly = True
+    return {
+        "capabilities": list(caps),
+        "has_full_access": has_full,
+        "has_readonly": has_readonly,
+        "connection_count": len(rows)
+    }
 
 # ─── Campaigns ────────────────────────────────────────────────────────────────
 
