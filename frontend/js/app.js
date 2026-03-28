@@ -37,69 +37,6 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-// ── MOCK DATA ─────────────────────────────────────────────────────────────────
-const MOCK = {
-  bms: [
-    { id:'bm_001', name:'BM Principal', bm_id:'123456789', status:'connected', accounts_count:4 },
-    { id:'bm_002', name:'BM Secundário', bm_id:'987654321', status:'connected', accounts_count:2 },
-    { id:'bm_003', name:'BM Internacional', bm_id:'456789123', status:'error', accounts_count:1 },
-  ],
-  accounts: [
-    { id:'acc_001', name:'BR - PROD001', account_id:'act_123456', bm_id:'bm_001', country:'BR', flag:'🇧🇷', status:'active', spend:1250.50, conversions:45, roas:3.2, cpa:27.79 },
-    { id:'acc_002', name:'US - PROD002', account_id:'act_789012', bm_id:'bm_001', country:'US', flag:'🇺🇸', status:'active', spend:890.00, conversions:23, roas:2.8, cpa:38.70 },
-    { id:'acc_003', name:'MX - PROD003', account_id:'act_345678', bm_id:'bm_001', country:'MX', flag:'🇲🇽', status:'active', spend:620.00, conversions:18, roas:4.1, cpa:34.44 },
-    { id:'acc_004', name:'AR - OLD', account_id:'act_555555', bm_id:'bm_002', country:'AR', flag:'🇦🇷', status:'error', spend:0, conversions:0, roas:0, cpa:0 },
-    { id:'acc_005', name:'CO - PROD001', account_id:'act_111222', bm_id:'bm_002', country:'CO', flag:'🇨🇴', status:'active', spend:430.00, conversions:12, roas:2.5, cpa:35.83 },
-    { id:'acc_006', name:'CL - PROD002', account_id:'act_333444', bm_id:'bm_003', country:'CL', flag:'🇨🇱', status:'active', spend:780.00, conversions:31, roas:3.8, cpa:25.16 },
-    { id:'acc_007', name:'PE - PROD003', account_id:'act_666777', bm_id:'bm_001', country:'PE', flag:'🇵🇪', status:'active', spend:320.00, conversions:9, roas:2.9, cpa:35.56 },
-  ],
-  campaigns: [
-    { id:'c01', name:'BR_PROD001_Conversao_01', account:'BR - PROD001', country:'BR', status:'active',  spend:156.50, conversions:12, roas:3.5, cpa:13.04, ctr:2.1 },
-    { id:'c02', name:'BR_PROD001_Conversao_02', account:'BR - PROD001', country:'BR', status:'active',  spend:89.20,  conversions:0,  roas:0,   cpa:0,     ctr:0.8 },
-    { id:'c03', name:'US_PROD002_Vendas_Test',  account:'US - PROD002', country:'US', status:'active',  spend:234.90, conversions:8,  roas:2.8, cpa:29.36, ctr:1.9 },
-    { id:'c04', name:'MX_PROD003_Trafego',      account:'MX - PROD003', country:'MX', status:'paused', spend:45.00,  conversions:3,  roas:2.1, cpa:15.00, ctr:1.2 },
-    { id:'c05', name:'BR_PROD001_Conv_05',      account:'BR - PROD001', country:'BR', status:'active',  spend:5.00,   conversions:0,  roas:0,   cpa:0,     ctr:0.4 },
-    { id:'c06', name:'CO_PROD001_Retargeting',  account:'CO - PROD001', country:'CO', status:'active',  spend:123.00, conversions:5,  roas:3.1, cpa:24.60, ctr:2.4 },
-    { id:'c07', name:'CL_PROD002_Awareness',    account:'CL - PROD002', country:'CL', status:'active',  spend:256.00, conversions:11, roas:3.7, cpa:23.27, ctr:3.1 },
-    { id:'c08', name:'US_PROD002_Retargeting',  account:'US - PROD002', country:'US', status:'paused', spend:0,      conversions:0,  roas:0,   cpa:0,     ctr:0   },
-    { id:'c09', name:'BR_PROD001_Lookalike',    account:'BR - PROD001', country:'BR', status:'active',  spend:2.50,   conversions:0,  roas:0,   cpa:0,     ctr:0.2 },
-    { id:'c10', name:'MX_PROD003_Conv_01',      account:'MX - PROD003', country:'MX', status:'active',  spend:178.00, conversions:7,  roas:4.2, cpa:25.43, ctr:2.8 },
-    { id:'c11', name:'CL_PROD002_Conv_01',      account:'CL - PROD002', country:'CL', status:'active',  spend:312.00, conversions:14, roas:4.0, cpa:22.29, ctr:3.5 },
-    { id:'c12', name:'PE_PROD003_Vendas',       account:'PE - PROD003', country:'PE', status:'active',  spend:98.00,  conversions:3,  roas:2.9, cpa:32.67, ctr:1.7 },
-  ],
-  alerts: [
-    { id:'al1', campaign:'BR_PROD001_Conversao_02', msg:'Gastou 100% do budget sem conversões',       severity:'critical', spend:89.20, conv:0 },
-    { id:'al2', campaign:'BR_PROD001_Conv_05',       msg:'Gastou $5 sem nenhuma venda — regra acionada', severity:'critical', spend:5.00,  conv:0 },
-    { id:'al3', campaign:'BR_PROD001_Lookalike',     msg:'Gastou 50% do budget sem checkouts',         severity:'warning',  spend:2.50,  conv:0 },
-    { id:'al4', campaign:'US_PROD002_Vendas_Test',   msg:'ROAS abaixo de 3.0 — verificar criativo',    severity:'warning',  spend:234.90,conv:8 },
-    { id:'al5', campaign:'PE_PROD003_Vendas',        msg:'CPA acima de $30 — acima da meta',           severity:'info',     spend:98.00, conv:3 },
-    { id:'al6', campaign:'MX_PROD003_Trafego',       msg:'Campanha pausada automaticamente por ROAS baixo', severity:'info', spend:45.00,conv:3 },
-  ],
-  rules: [
-    { id:'r01', name:'$5 Gastos Sem Venda — Pausar',    conditions:[{metric:'spend',operator:'>=',value:5},{metric:'conversions',operator:'==',value:0}], action:'pause',  enabled:true,  trigger_count:12 },
-    { id:'r02', name:'50% Budget Sem Checkout — Alertar', conditions:[{metric:'spend_pct',operator:'>=',value:50},{metric:'checkouts',operator:'==',value:0}], action:'notify', enabled:true,  trigger_count:5 },
-    { id:'r03', name:'ROAS Baixo — Pausar',             conditions:[{metric:'roas',operator:'<',value:2.0}], action:'pause',  enabled:false, trigger_count:0 },
-  ],
-  products: [
-    { code:'PROD001', invest:1580.20, conversions:57, roas:3.2, cpa:27.72, campaigns:5, trend:+12 },
-    { code:'PROD002', invest:1124.90, conversions:42, roas:3.0, cpa:26.78, campaigns:4, trend:-3  },
-    { code:'PROD003', invest:643.00,  conversions:19, roas:3.7, cpa:33.84, campaigns:3, trend:+8  },
-  ],
-  timeSeries(days=7) {
-    const labels=[], invest=[], conv=[], roas=[];
-    for(let i=days-1;i>=0;i--) {
-      const d = new Date(); d.setDate(d.getDate()-i);
-      labels.push(d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}));
-      const inv = 1200 + Math.random()*1800;
-      const c   = Math.floor(20 + Math.random()*60);
-      invest.push(+inv.toFixed(2));
-      conv.push(c);
-      roas.push(+(c*35/inv).toFixed(2));
-    }
-    return { labels, invest, conv, roas };
-  }
-};
-
 // ── API CLIENT ────────────────────────────────────────────────────────────────
 const API = {
   async get(path)      { try { const r=await fetch(path); return r.ok?r.json():null; } catch { return null; } },
@@ -115,12 +52,12 @@ document.addEventListener('alpine:init', () => {
 
 // ── GLOBAL STORE ─────────────────────────────────────────────────────────────
 Alpine.store('meta', {
-  demoMode: true,
+  demoMode: false,
   bmCount: 0,
   accountCount: 0,
   async refresh() {
     const s = await API.get('/api/status');
-    if (s) { this.demoMode = s.demo_mode; this.bmCount = s.bm_count; this.accountCount = s.account_count; }
+    if (s) { this.demoMode = false; this.bmCount = s.bm_count; this.accountCount = s.account_count; }
   },
 });
 
@@ -253,19 +190,20 @@ Alpine.data('Dashboard', () => ({
   async fetchDashboard() {
     this.loading = true;
     const data = await API.get(`/api/dashboard?period=${parseInt(this.period)||7}&view_by=${this.viewBy}`);
-    if (data) {
-      this.apiData = data;
-      this.ts = data.time_series || MOCK.timeSeries(parseInt(this.period)||7);
-    } else {
-      this.ts = MOCK.timeSeries(parseInt(this.period)||7);
-    }
+    this.apiData = data || {};
+    const rawTs = (data && data.time_series) || [];
+    this.ts = {
+      labels: rawTs.map(d => d.date),
+      invest: rawTs.map(d => d.invest),
+      conv:   rawTs.map(d => d.conversions),
+      roas:   rawTs.map(d => d.roas),
+    };
     this.loading = false;
     this.$nextTick(() => this.buildCharts());
   },
 
   get accounts() {
-    if (this.apiData && this.apiData.by_account) return this.apiData.by_account;
-    return MOCK.accounts;
+    return (this.apiData && this.apiData.by_account) || [];
   },
 
   get tableData() {
@@ -324,7 +262,7 @@ Alpine.data('Dashboard', () => ({
     const accs = this.accounts;
     const byCountry = this.apiData?.by_country || [];
     if(this.viewBy==='account')  { labels=accs.map(a=>(a.name||'').split(' - ').pop()||a.name); invest=accs.map(a=>a.spend||a.invest||0); conv=accs.map(a=>a.conversions||0); }
-    else if(this.viewBy==='product') { const prods = this.apiData?.by_product || MOCK.products; labels=prods.map(p=>p.name||p.code); invest=prods.map(p=>p.invest||p.spend||0); conv=prods.map(p=>p.conversions||0); }
+    else if(this.viewBy==='product') { const prods = this.apiData?.by_product || []; labels=prods.map(p=>p.name||p.code); invest=prods.map(p=>p.invest||p.spend||0); conv=prods.map(p=>p.conversions||0); }
     else { labels=byCountry.map(c=>c.name); invest=byCountry.map(c=>c.invest||0); conv=byCountry.map(c=>c.conversions||0); }
     this.charts.perf = new Chart(el.getContext('2d'), {
       type: 'bar',
@@ -366,15 +304,17 @@ Alpine.data('Dashboard', () => ({
     return `
     <div class="fade-in space-y-6">
 
-      <!-- Demo Banner (only in demo mode) -->
-      <div class="demo-banner" x-show="$store.meta.demoMode">
-        <i class="fas fa-flask text-amber-400 text-lg"></i>
-        <div class="flex-1">
-          <p class="text-amber-300 font-semibold text-sm">Modo Demonstração</p>
-          <p class="text-amber-400/70 text-xs mt-0.5">Dados fictícios. Conecte suas contas reais em <strong>Business Managers</strong> para ver dados reais.</p>
+      <!-- Empty state — no accounts connected -->
+      <div x-show="$store.meta.accountCount === 0" class="rounded-2xl p-5 flex items-center gap-4" style="background:rgba(30,41,59,0.8);border:1px solid rgba(59,130,246,0.3);">
+        <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:rgba(59,130,246,0.15);">
+          <i class="fas fa-plug text-blue-400"></i>
         </div>
-        <button @click="$dispatch('navigate',{page:'bm'})" class="btn btn-sm whitespace-nowrap" style="background:rgba(245,158,11,0.2);border:1px solid rgba(245,158,11,0.4);color:#fbbf24;">
-          <i class="fas fa-plus text-xs"></i> Conectar Conta
+        <div class="flex-1">
+          <p class="text-slate-200 font-semibold text-sm">Nenhuma conta conectada</p>
+          <p class="text-slate-400 text-xs mt-0.5">Adicione um Business Manager para começar a ver dados reais das suas campanhas.</p>
+        </div>
+        <button @click="$dispatch('navigate',{page:'connections'})" class="btn btn-sm whitespace-nowrap" style="background:rgba(59,130,246,0.2);border:1px solid rgba(59,130,246,0.4);color:#60a5fa;">
+          <i class="fas fa-plus text-xs"></i> Conectar API
         </button>
       </div>
 

@@ -81,12 +81,25 @@ Alpine.data('BmPage', function() {
         toast('success', 'BM atualizado!');
       } else {
         const r = await API.post('/api/bm', this.form);
-        if (r?.id) this.bms.push({ id:r.id, name:this.form.name, bm_id:this.form.bm_id, status:'connected', accounts_count:0 });
-        toast('success', 'BM "' + this.form.name + '" adicionado!');
+        if (r?.status === 'success') {
+          toast('success', r.message || 'BM adicionado!');
+          await this.loadData();
+        }
       }
       this.saving = false;
       this.showModal = false;
       await this.$store.meta.refresh();
+    },
+
+    async syncAccounts(bmId) {
+      toast('info', 'Sincronizando contas...');
+      const r = await API.post(`/api/bm/${bmId}/sync-accounts`, {});
+      if (r?.status === 'success') {
+        toast('success', r.message || 'Contas sincronizadas!');
+        await this.loadData();
+      } else {
+        toast('error', 'Erro ao sincronizar contas');
+      }
     },
 
     async deleteBm(id, name) {
@@ -193,24 +206,35 @@ Alpine.data('ProductsPage', function() {
     period: '7',
     selected: null,
     chart: null,
+    products: [],
+    campaigns: [],
 
-    init() {
+    async init() {
+      const dash = await API.get(`/api/dashboard?period=${this.period}&view_by=product`);
+      this.products = (dash && dash.by_product) || [];
+      this.campaigns = (dash && dash.campaigns) || [];
       this.$nextTick(() => this.buildChart());
-      this.$watch('period', () => this.$nextTick(() => this.buildChart()));
+      this.$watch('period', async () => {
+        const d = await API.get(`/api/dashboard?period=${this.period}&view_by=product`);
+        this.products = (d && d.by_product) || [];
+        this.campaigns = (d && d.campaigns) || [];
+        this.$nextTick(() => this.buildChart());
+      });
     },
 
     buildChart() {
       if (this.chart) { try { this.chart.destroy(); } catch {} }
       const el = document.getElementById('ch-products');
-      if (!el) return;
+      if (!el || !this.products || !this.products.length) return;
+      const prods = this.products;
       this.chart = new Chart(el.getContext('2d'), {
         type: 'bar',
         data: {
-          labels: MOCK.products.map(p => p.code),
+          labels: prods.map(p => p.code || p.name || ''),
           datasets: [
-            { label:'Investimento ($)', data: MOCK.products.map(p => p.invest), backgroundColor: hexToRgba('#3b82f6',0.75), borderColor:'#3b82f6', borderWidth:1, borderRadius:6 },
-            { label:'Conversões x10', data: MOCK.products.map(p => p.conversions*10), backgroundColor: hexToRgba('#22c55e',0.75), borderColor:'#22c55e', borderWidth:1, borderRadius:6 },
-            { label:'ROAS x100', data: MOCK.products.map(p => p.roas*100), backgroundColor: hexToRgba('#f59e0b',0.75), borderColor:'#f59e0b', borderWidth:1, borderRadius:6 },
+            { label:'Investimento ($)', data: prods.map(p => p.invest||0), backgroundColor: hexToRgba('#3b82f6',0.75), borderColor:'#3b82f6', borderWidth:1, borderRadius:6 },
+            { label:'Conversões x10', data: prods.map(p => (p.conversions||0)*10), backgroundColor: hexToRgba('#22c55e',0.75), borderColor:'#22c55e', borderWidth:1, borderRadius:6 },
+            { label:'ROAS x100', data: prods.map(p => (p.roas||0)*100), backgroundColor: hexToRgba('#f59e0b',0.75), borderColor:'#f59e0b', borderWidth:1, borderRadius:6 },
           ]
         },
         options: {
@@ -221,7 +245,7 @@ Alpine.data('ProductsPage', function() {
       });
     },
 
-    getCampaigns(code) { return MOCK.campaigns.filter(c => c.name.includes(code)); },
+    getCampaigns(code) { return (this.campaigns||[]).filter(c => (c.name||'').includes(code)); },
 
     renderPage() { return window.TPL.products(this); },
   };
@@ -571,6 +595,7 @@ Alpine.data('ReportsPage', function() {
     generating: false,
     showPreview: false,
     chart: null,
+    reportData: null,
 
     init() {},
 
@@ -578,7 +603,8 @@ Alpine.data('ReportsPage', function() {
 
     async generatePreview() {
       this.generating = true;
-      await new Promise(r => setTimeout(r, 1100));
+      const result = await API.post('/api/reports/generate', {days: parseInt(this.period)||7});
+      this.reportData = result && result.data ? result.data : null;
       this.generating = false; this.showPreview = true;
       this.$nextTick(() => this.buildChart());
       toast('success','Relatório gerado!');
@@ -588,7 +614,8 @@ Alpine.data('ReportsPage', function() {
       if (this.chart) { try { this.chart.destroy(); } catch {} }
       const el = document.getElementById('ch-report');
       if (!el) return;
-      const ts = MOCK.timeSeries(parseInt(this.period)||7);
+      const rawTs = (this.reportData && this.reportData.time_series) || [];
+      const ts = { labels: rawTs.map(d=>d.date), invest: rawTs.map(d=>d.invest), conv: rawTs.map(d=>d.conversions) };
       this.chart = new Chart(el.getContext('2d'), {
         type:'line',
         data:{
@@ -596,6 +623,7 @@ Alpine.data('ReportsPage', function() {
           datasets:[
             {label:'Investimento',data:ts.invest,borderColor:'#3b82f6',fill:false,tension:0.4,pointRadius:4,pointBackgroundColor:'#3b82f6'},
             {label:'Conversões x50',data:ts.conv.map(v=>v*50),borderColor:'#22c55e',fill:false,tension:0.4,pointRadius:4,pointBackgroundColor:'#22c55e'},
+
           ]
         },
         options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#94a3b8',font:{size:11}}},tooltip:{backgroundColor:'rgba(15,23,42,0.95)',borderColor:'rgba(51,65,85,0.8)',borderWidth:1,padding:10}},scales:{x:{grid:{color:'rgba(51,65,85,0.3)'},ticks:{color:'#64748b'}},y:{grid:{color:'rgba(51,65,85,0.3)'},ticks:{color:'#64748b'}}}}
@@ -702,6 +730,10 @@ bm(s) {
           <p class="text-slate-400 text-xs mt-0.5">ID: <span class="font-mono text-slate-300">${bm.bm_id}</span> &nbsp;•&nbsp; ${accs.length} conta(s)</p>
         </div>
         <div class="flex items-center gap-2 flex-shrink-0">
+          <button @click="syncAccounts('${bm.id}')" class="btn btn-secondary btn-sm" title="Sincronizar contas de anúncio">
+            <i class="fas fa-rotate-right text-xs"></i>
+            <span class="hidden sm:inline">Sincronizar</span>
+          </button>
           <button @click="toggleExpand('${bm.id}')" class="btn btn-secondary btn-sm">
             <i :class="expanded['${bm.id}']?'fas fa-chevron-up':'fas fa-chevron-down'" class="text-xs"></i>
             <span class="hidden sm:inline" x-text="expanded['${bm.id}']?'Recolher':'Expandir'"></span>
@@ -1176,25 +1208,30 @@ accounts(s) {
 // ── Products Page ─────────────────────────────────────────────────────────
 products(s) {
   const medals = ['🥇','🥈','🥉'];
-  const rows = MOCK.products.map((p,i) => `
-    <tr @click="selected=selected==='${p.code}'?null:'${p.code}'" class="cursor-pointer" :class="selected==='${p.code}'?'bg-blue-600/10':''">
-      <td class="font-bold text-white">${medals[i]||''} ${p.code}</td>
-      <td class="text-blue-400 font-mono">$${p.invest.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-      <td class="text-green-400 font-semibold">${p.conversions}</td>
-      <td class="${p.roas>=3.5?'text-green-400':p.roas>=2.5?'text-amber-400':'text-red-400'} font-semibold">${p.roas.toFixed(2)}x</td>
-      <td class="text-slate-300">$${p.cpa.toFixed(2)}</td>
-      <td>${p.campaigns} camps.</td>
-      <td class="${p.trend>0?'text-green-400':'text-red-400'} font-semibold">
-        <i class="fas fa-arrow-${p.trend>0?'up':'down'} text-xs"></i> ${Math.abs(p.trend)}%
+  const prods = s.products || [];
+  const camps = s.campaigns || [];
+
+  const rows = prods.length === 0
+    ? `<tr><td colspan="7" class="text-center py-8 text-slate-500"><i class="fas fa-box-open mr-2"></i>Nenhum produto encontrado — conecte contas de anúncio.</td></tr>`
+    : prods.map((p,i) => `
+    <tr @click="selected=selected==='${p.code||p.name}'?null:'${p.code||p.name}'" class="cursor-pointer" :class="selected==='${p.code||p.name}'?'bg-blue-600/10':''">
+      <td class="font-bold text-white">${medals[i]||''} ${p.code||p.name||'-'}</td>
+      <td class="text-blue-400 font-mono">$${(p.invest||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <td class="text-green-400 font-semibold">${p.conversions||0}</td>
+      <td class="${(p.roas||0)>=3.5?'text-green-400':(p.roas||0)>=2.5?'text-amber-400':'text-red-400'} font-semibold">${(p.roas||0).toFixed(2)}x</td>
+      <td class="text-slate-300">$${(p.cpa||0).toFixed(2)}</td>
+      <td>${p.campaigns||0} camps.</td>
+      <td class="${(p.trend||0)>0?'text-green-400':'text-red-400'} font-semibold">
+        <i class="fas fa-arrow-${(p.trend||0)>0?'up':'down'} text-xs"></i> ${Math.abs(p.trend||0)}%
       </td>
     </tr>`).join('');
 
-  const campRows = s.selected ? MOCK.campaigns.filter(c=>c.name.includes(s.selected)).map(c=>`
+  const campRows = s.selected ? camps.filter(c=>(c.name||'').includes(s.selected)).map(c=>`
     <div class="flex items-center gap-3 p-3 rounded-xl" style="background:rgba(15,23,42,0.5);border:1px solid rgba(51,65,85,0.3);">
       <span class="badge ${c.status==='active'?'badge-green':'badge-slate'}">${c.status==='active'?'Ativa':'Pausada'}</span>
       <span class="text-sm text-white flex-1 font-medium truncate">${c.name}</span>
-      <span class="text-slate-400 text-xs">$${c.spend.toFixed(2)}</span>
-      <span class="${c.roas>=3?'text-green-400':c.roas>=2?'text-amber-400':c.roas===0?'text-slate-500':'text-red-400'} text-xs font-semibold">${c.roas>0?c.roas.toFixed(2)+'x':'—'}</span>
+      <span class="text-slate-400 text-xs">$${(c.spend||0).toFixed(2)}</span>
+      <span class="${(c.roas||0)>=3?'text-green-400':(c.roas||0)>=2?'text-amber-400':!c.roas?'text-slate-500':'text-red-400'} text-xs font-semibold">${c.roas>0?c.roas.toFixed(2)+'x':'—'}</span>
     </div>`).join('') : '';
 
   return `
@@ -1205,7 +1242,7 @@ products(s) {
         <option value="14">Últimos 14 dias</option>
         <option value="30">Últimos 30 dias</option>
       </select>
-      <button @click="$nextTick(()=>buildChart()); $dispatch('show-toast',{type:'success',message:'Dados atualizados!'})" class="btn btn-secondary btn-sm">
+      <button @click="init(); $dispatch('show-toast',{type:'success',message:'Dados atualizados!'})" class="btn btn-secondary btn-sm">
         <i class="fas fa-rotate-right"></i> Atualizar
       </button>
     </div>
@@ -1216,7 +1253,7 @@ products(s) {
         <i class="fas fa-chart-bar text-purple-400"></i> Comparativo de Produtos
       </h3>
       <div class="chart-container" style="height:240px;">
-        <canvas id="ch-products"></canvas>
+        ${prods.length === 0 ? '<div class="flex items-center justify-center h-full text-slate-600 text-sm"><i class="fas fa-chart-bar mr-2"></i>Sem dados — conecte uma conta de anúncio</div>' : '<canvas id="ch-products"></canvas>'}
       </div>
     </div>
 
@@ -1225,7 +1262,7 @@ products(s) {
       <div class="p-4 border-b" style="border-color:rgba(51,65,85,0.4);">
         <h3 class="text-sm font-semibold text-slate-300 flex items-center gap-2">
           <i class="fas fa-box text-amber-400"></i> Performance por Produto
-          <span class="badge badge-slate text-xs">${MOCK.products.length} produtos</span>
+          <span class="badge badge-slate text-xs">${prods.length} produtos</span>
         </h3>
       </div>
       <div class="overflow-x-auto">
@@ -1863,14 +1900,12 @@ reports(s) {
         </div>
 
         <div x-show="showPreview" x-transition class="space-y-4" style="display:none;">
-          <!-- Summary cards -->
+          <!-- Summary cards (dynamic) -->
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            ${[['Investimento','$4,290.00','fas fa-dollar-sign','#3b82f6'],['Conversões','63','fas fa-bullseye','#22c55e'],['ROAS Médio','3.28x','fas fa-chart-line','#f59e0b'],['CPA Médio','$68.10','fas fa-coins','#a855f7']].map(([l,v,ic,co])=>`
-            <div class="glass rounded-xl p-3 text-center">
-              <i class="${ic} text-2xl mb-1 block" style="color:${co}"></i>
-              <p class="text-white font-bold text-lg">${v}</p>
-              <p class="text-slate-400 text-xs">${l}</p>
-            </div>`).join('')}
+            <div class="glass rounded-xl p-3 text-center"><i class="fas fa-dollar-sign text-2xl mb-1 block" style="color:#3b82f6"></i><p class="text-white font-bold text-lg" x-text="reportData && reportData.summary ? '$'+(reportData.summary.total_invest||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'"></p><p class="text-slate-400 text-xs">Investimento</p></div>
+            <div class="glass rounded-xl p-3 text-center"><i class="fas fa-bullseye text-2xl mb-1 block" style="color:#22c55e"></i><p class="text-white font-bold text-lg" x-text="reportData && reportData.summary ? (reportData.summary.total_conversions||0) : '—'"></p><p class="text-slate-400 text-xs">Conversões</p></div>
+            <div class="glass rounded-xl p-3 text-center"><i class="fas fa-chart-line text-2xl mb-1 block" style="color:#f59e0b"></i><p class="text-white font-bold text-lg" x-text="reportData && reportData.summary ? (reportData.summary.avg_roas||0).toFixed(2)+'x' : '—'"></p><p class="text-slate-400 text-xs">ROAS Médio</p></div>
+            <div class="glass rounded-xl p-3 text-center"><i class="fas fa-coins text-2xl mb-1 block" style="color:#a855f7"></i><p class="text-white font-bold text-lg" x-text="reportData && reportData.summary ? '$'+(reportData.summary.avg_cpa||0).toFixed(2) : '—'"></p><p class="text-slate-400 text-xs">CPA Médio</p></div>
           </div>
           <!-- Chart -->
           <div class="glass rounded-2xl p-5">
@@ -1884,21 +1919,24 @@ reports(s) {
           <!-- Table preview -->
           <div class="glass rounded-2xl overflow-hidden">
             <div class="p-4 border-b" style="border-color:rgba(51,65,85,0.4);">
-              <h3 class="text-sm font-semibold text-slate-300">Dados Detalhados</h3>
+              <h3 class="text-sm font-semibold text-slate-300">Dados Detalhados por Conta</h3>
             </div>
             <div class="overflow-x-auto">
               <table class="data-table">
-                <thead><tr><th>Conta</th><th>País</th><th>Invest.</th><th>Conv.</th><th>ROAS</th><th>CPA</th></tr></thead>
+                <thead><tr><th>Conta</th><th>Invest.</th><th>Conv.</th></tr></thead>
                 <tbody>
-                  ${MOCK.accounts.map(a=>`
-                  <tr>
-                    <td class="font-medium text-white">${a.name}</td>
-                    <td>${a.flag} ${a.country}</td>
-                    <td class="font-mono text-blue-400">$${a.spend.toLocaleString('en-US',{minimumFractionDigits:2})}</td>
-                    <td class="text-green-400">${a.conversions}</td>
-                    <td class="${a.roas>=3?'text-green-400':a.roas>=2?'text-amber-400':'text-red-400'}">${a.roas.toFixed(2)}x</td>
-                    <td>$${a.cpa.toFixed(2)}</td>
-                  </tr>`).join('')}
+                  <template x-if="reportData && reportData.by_account && reportData.by_account.length">
+                    <template x-for="a in reportData.by_account" :key="a.name">
+                      <tr>
+                        <td class="font-medium text-white" x-text="a.name"></td>
+                        <td class="font-mono text-blue-400" x-text="'$'+(a.spend||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})"></td>
+                        <td class="text-green-400" x-text="a.conversions||0"></td>
+                      </tr>
+                    </template>
+                  </template>
+                  <template x-if="!reportData || !reportData.by_account || !reportData.by_account.length">
+                    <tr><td colspan="3" class="text-center py-4 text-slate-500">Sem dados para exibir</td></tr>
+                  </template>
                 </tbody>
               </table>
             </div>
@@ -2142,15 +2180,15 @@ settings(s) {
             <p class="text-slate-400 text-sm max-w-md mx-auto">Plataforma profissional de gestão de campanhas Meta Ads. Monitore, analise e otimize suas campanhas em tempo real.</p>
             <div class="grid grid-cols-3 gap-4 pt-2">
               <div class="glass rounded-xl p-3 text-center">
-                <p class="text-white font-bold text-lg">${MOCK.bms.length}</p>
+                <p class="text-white font-bold text-lg" x-text="$store.meta.bmCount"></p>
                 <p class="text-slate-400 text-xs">BMs</p>
               </div>
               <div class="glass rounded-xl p-3 text-center">
-                <p class="text-white font-bold text-lg">${MOCK.accounts.length}</p>
+                <p class="text-white font-bold text-lg" x-text="$store.meta.accountCount"></p>
                 <p class="text-slate-400 text-xs">Contas</p>
               </div>
               <div class="glass rounded-xl p-3 text-center">
-                <p class="text-white font-bold text-lg">${MOCK.campaigns.length}</p>
+                <p class="text-white font-bold text-lg">—</p>
                 <p class="text-slate-400 text-xs">Campanhas</p>
               </div>
             </div>

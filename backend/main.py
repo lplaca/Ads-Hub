@@ -812,43 +812,46 @@ def sync_sheets_to_db(config: dict) -> dict:
     conn.close()
     return {"synced_accounts": synced_accounts, "synced_products": synced_products}
 
-# ─── MOCK DATA (fallback) ──────────────────────────────────────────────────────
+# ─── BM ACCOUNT SYNC ──────────────────────────────────────────────────────────
 
-MOCK_BMS = [
-    {"id": "bm_001", "name": "BM Principal", "bm_id": "123456789", "access_token": "***", "status": "connected", "accounts_count": 4},
-    {"id": "bm_002", "name": "BM Secundário", "bm_id": "987654321", "access_token": "***", "status": "connected", "accounts_count": 2},
-]
+# Status code 1 = ACTIVE in Meta API
+_ACCT_STATUS_MAP = {1: "active", 2: "disabled", 3: "unsettled", 9: "in_grace_period", 101: "closed"}
 
-MOCK_ACCOUNTS = [
-    {"id": "acc_001", "name": "BR - PROD001", "account_id": "act_123456", "bm_id": "bm_001", "country": "BR", "status": "active", "spend": 1250.50, "conversions": 45, "roas": 3.2, "cpa": 27.79},
-    {"id": "acc_002", "name": "US - PROD002", "account_id": "act_789012", "bm_id": "bm_001", "country": "US", "status": "active", "spend": 890.00, "conversions": 23, "roas": 2.8, "cpa": 38.70},
-    {"id": "acc_003", "name": "MX - PROD003", "account_id": "act_345678", "bm_id": "bm_001", "country": "MX", "status": "active", "spend": 620.00, "conversions": 18, "roas": 4.1, "cpa": 34.44},
-    {"id": "acc_004", "name": "CO - PROD001", "account_id": "act_111222", "bm_id": "bm_002", "country": "CO", "status": "active", "spend": 430.00, "conversions": 12, "roas": 2.5, "cpa": 35.83},
-    {"id": "acc_005", "name": "CL - PROD002", "account_id": "act_333444", "bm_id": "bm_002", "country": "CL", "status": "active", "spend": 780.00, "conversions": 31, "roas": 3.8, "cpa": 25.16},
-]
+def fetch_bm_ad_accounts(bm_id: str, token: str) -> list:
+    """Fetch all ad accounts linked to a BM (owned + client), deduplicated."""
+    accounts = []
+    for endpoint in [f"{bm_id}/owned_ad_accounts", f"{bm_id}/client_ad_accounts"]:
+        data = meta_get(endpoint, token, {"fields": "id,name,account_status,currency,timezone_name", "limit": 200})
+        if "data" in data:
+            accounts += data["data"]
+    seen, unique = set(), []
+    for a in accounts:
+        if a.get("id") and a["id"] not in seen:
+            seen.add(a["id"])
+            unique.append(a)
+    return unique
 
-MOCK_CAMPAIGNS = [
-    {"id": "camp_001", "name": "BR_PROD001_Conversao_01", "account": "BR - PROD001", "account_id": "acc_001", "country": "BR", "status": "active", "spend": 156.50, "conversions": 12, "roas": 3.5, "cpa": 13.04, "ctr": 2.1},
-    {"id": "camp_002", "name": "BR_PROD001_Conversao_02", "account": "BR - PROD001", "account_id": "acc_001", "country": "BR", "status": "active", "spend": 89.20, "conversions": 0, "roas": 0, "cpa": 0, "ctr": 0.8},
-    {"id": "camp_003", "name": "US_PROD002_Vendas_Test",  "account": "US - PROD002", "account_id": "acc_002", "country": "US", "status": "active", "spend": 234.90, "conversions": 8, "roas": 2.8, "cpa": 29.36, "ctr": 1.9},
-    {"id": "camp_004", "name": "MX_PROD003_Trafego",      "account": "MX - PROD003", "account_id": "acc_003", "country": "MX", "status": "paused", "spend": 45.00, "conversions": 3, "roas": 2.1, "cpa": 15.00, "ctr": 1.2},
-    {"id": "camp_005", "name": "BR_PROD001_Conv_05",      "account": "BR - PROD001", "account_id": "acc_001", "country": "BR", "status": "active", "spend": 5.00, "conversions": 0, "roas": 0, "cpa": 0, "ctr": 0.4},
-    {"id": "camp_006", "name": "CO_PROD001_Retargeting",  "account": "CO - PROD001", "account_id": "acc_004", "country": "CO", "status": "active", "spend": 123.00, "conversions": 5, "roas": 3.1, "cpa": 24.60, "ctr": 2.4},
-    {"id": "camp_007", "name": "CL_PROD002_Awareness",    "account": "CL - PROD002", "account_id": "acc_005", "country": "CL", "status": "active", "spend": 256.00, "conversions": 11, "roas": 3.7, "cpa": 23.27, "ctr": 3.1},
-    {"id": "camp_008", "name": "PE_PROD003_Vendas",       "account": "PE - PROD003", "account_id": "acc_003", "country": "PE", "status": "active", "spend": 98.00, "conversions": 3, "roas": 2.9, "cpa": 32.67, "ctr": 1.7},
-]
-
-MOCK_ALERTS = [
-    {"id": "alert_001", "campaign_id": "camp_002", "campaign_name": "BR_PROD001_Conversao_02", "rule_name": "Gasto sem conversão", "message": "Gastou R$89 sem conversões", "severity": "critical", "spend": 89.20, "conversions": 0, "status": "active"},
-    {"id": "alert_002", "campaign_id": "camp_005", "campaign_name": "BR_PROD001_Conv_05", "rule_name": "$5 Sem Venda", "message": "Gastou $5 sem nenhuma venda", "severity": "critical", "spend": 5.00, "conversions": 0, "status": "active"},
-    {"id": "alert_003", "campaign_id": "camp_003", "campaign_name": "US_PROD002_Vendas_Test", "rule_name": "ROAS Baixo", "message": "ROAS abaixo de 3.0", "severity": "warning", "spend": 234.90, "conversions": 8, "status": "active"},
-]
-
-MOCK_RULES = [
-    {"id": "rule_001", "name": "$5 Gastos Sem Venda — Pausar", "conditions": [{"metric": "spend", "operator": ">=", "value": 5}, {"metric": "conversions", "operator": "==", "value": 0}], "action": "pause", "enabled": True, "trigger_count": 12, "last_run": None},
-    {"id": "rule_002", "name": "50% Budget Sem Checkout — Alertar", "conditions": [{"metric": "spend_pct", "operator": ">=", "value": 50}, {"metric": "checkouts", "operator": "==", "value": 0}], "action": "notify", "enabled": True, "trigger_count": 5, "last_run": None},
-    {"id": "rule_003", "name": "ROAS Baixo — Pausar", "conditions": [{"metric": "roas", "operator": "<", "value": 2.0}], "action": "pause", "enabled": False, "trigger_count": 0, "last_run": None},
-]
+def _sync_bm_accounts(bm_row_id: str, bm_id: str, token: str, conn) -> int:
+    """Fetch and upsert all accounts for a BM. Returns count of accounts imported."""
+    raw_accounts = fetch_bm_ad_accounts(bm_id, token)
+    count = 0
+    for ra in raw_accounts:
+        act_id = ra["id"].replace("act_", "")
+        existing = conn.execute("SELECT id FROM ad_accounts WHERE account_id=?", (f"act_{act_id}",)).fetchone()
+        status = _ACCT_STATUS_MAP.get(ra.get("account_status", 1), "active")
+        if existing:
+            conn.execute(
+                "UPDATE ad_accounts SET name=?, bm_id=?, status=? WHERE account_id=?",
+                (ra.get("name", f"act_{act_id}"), bm_row_id, status, f"act_{act_id}")
+            )
+        else:
+            conn.execute(
+                "INSERT INTO ad_accounts (id, name, account_id, bm_id, country, access_token, status) VALUES (?,?,?,?,?,?,?)",
+                (str(uuid.uuid4()), ra.get("name", f"act_{act_id}"), f"act_{act_id}",
+                 bm_row_id, "", token, status)
+            )
+            count += 1
+    return count
 
 def gen_time_series(days=7):
     data = []
@@ -886,8 +889,6 @@ def eval_condition(metric: str, operator: str, value, campaign: dict) -> bool:
 def run_rules_engine() -> dict:
     """
     Main rules engine: evaluate all active rules against all campaigns.
-    For real accounts: fetches live data from Meta API.
-    For demo mode: runs against mock campaigns.
     Returns a summary dict.
     """
     conn = get_db()
@@ -901,15 +902,11 @@ def run_rules_engine() -> dict:
         d["conditions"] = json.loads(d["conditions"])
         rules.append(d)
 
-    # Build campaign list with real or mock data
     campaigns = []
-    is_demo = len(accounts_rows) == 0
+    if not accounts_rows:
+        return {"rules_checked": 0, "campaigns_checked": 0, "actions_taken": 0, "demo_mode": False, "log": []}
 
-    if is_demo:
-        campaigns = MOCK_CAMPAIGNS.copy()
-        rules = rules if rules else MOCK_RULES
-    else:
-        for acc in accounts_rows:
+    for acc in accounts_rows:
             acc_d = dict(acc)
             token = acc_d["access_token"]
             account_id = acc_d["account_id"]
@@ -965,13 +962,13 @@ def run_rules_engine() -> dict:
             success = True
 
             if action == "pause":
-                if not is_demo and token:
+                if token:
                     success = pause_meta_campaign(camp_id, token)
                 camp["status"] = "paused"
                 severity = "critical"
                 msg = f"Regra '{rule['name']}' → Campanha pausada automaticamente"
             elif action == "activate":
-                if not is_demo and token:
+                if token:
                     success = activate_meta_campaign(camp_id, token)
                 camp["status"] = "active"
                 severity = "info"
@@ -1017,7 +1014,7 @@ def run_rules_engine() -> dict:
         "rules_checked": len(rules),
         "campaigns_checked": len(campaigns),
         "actions_taken": actions_taken,
-        "demo_mode": is_demo,
+        "demo_mode": False,
         "log": log_entries,
     }
 
@@ -1125,9 +1122,9 @@ def get_stats():
     conn.close()
     if acc_count == 0:
         return {
-            "total_investment": 4290.00, "total_conversions": 63, "avg_roas": 3.28,
-            "active_alerts": len(MOCK_ALERTS), "investment_change": 15.2,
-            "conversions_change": 8.4, "roas_change": -5.1, "alerts_change": 3,
+            "total_investment": 0, "total_conversions": 0, "avg_roas": 0,
+            "active_alerts": 0, "investment_change": 0,
+            "conversions_change": 0, "roas_change": 0, "alerts_change": 0,
         }
     # Real: aggregate from campaigns
     campaigns = _fetch_all_campaigns_cached()
@@ -1195,30 +1192,14 @@ def get_dashboard(period: int = 7, view_by: str = "account"):
     conn.close()
 
     if acc_count == 0:
-        # Demo mode — return mock data
         return {
-            "demo": True,
-            "stats": {
-                "total_investment": 4290.00, "total_conversions": 63, "avg_roas": 3.28,
-                "active_alerts": len(MOCK_ALERTS), "investment_change": 15.2,
-                "conversions_change": 8.4, "roas_change": -5.1,
-            },
-            "time_series": gen_time_series(period),
-            "by_account": MOCK_ACCOUNTS,
-            "by_product": [
-                {"name": "PROD001", "invest": 1580.20, "conversions": 57, "roas": 3.2, "cpa": 27.72},
-                {"name": "PROD002", "invest": 1124.90, "conversions": 42, "roas": 3.0, "cpa": 26.78},
-                {"name": "PROD003", "invest": 643.00,  "conversions": 19, "roas": 3.7, "cpa": 33.84},
-            ],
-            "by_country": [
-                {"name": "Brasil", "invest": 1500, "conversions": 57},
-                {"name": "USA", "invest": 890, "conversions": 23},
-                {"name": "Chile", "invest": 780, "conversions": 31},
-                {"name": "Colômbia", "invest": 430, "conversions": 12},
-                {"name": "México", "invest": 620, "conversions": 18},
-                {"name": "Peru", "invest": 320, "conversions": 9},
-            ],
-            "campaigns": MOCK_CAMPAIGNS,
+            "demo": False,
+            "stats": {"total_investment": 0, "total_conversions": 0, "avg_roas": 0, "active_alerts": 0, "investment_change": 0, "conversions_change": 0, "roas_change": 0},
+            "time_series": [],
+            "by_account": [],
+            "by_product": [],
+            "by_country": [],
+            "campaigns": [],
         }
 
     # ── Real mode — aggregate from Meta API ─────────────────────────────────
@@ -1277,8 +1258,6 @@ def list_bms():
     conn = get_db()
     rows = conn.execute("SELECT * FROM business_managers").fetchall()
     conn.close()
-    if not rows:
-        return MOCK_BMS
     result = []
     for r in rows:
         d = dict(r)
@@ -1294,9 +1273,37 @@ def add_bm(data: dict):
         "INSERT INTO business_managers (id, name, bm_id, access_token) VALUES (?,?,?,?)",
         (bid, data["name"], data["bm_id"], data["access_token"]),
     )
+    # Auto-sync ad accounts linked to this BM
+    imported = 0
+    try:
+        imported = _sync_bm_accounts(bid, data["bm_id"], data["access_token"], conn)
+    except Exception:
+        pass
     conn.commit()
     conn.close()
-    return {"id": bid, "status": "success", "message": "BM adicionado com sucesso!"}
+    msg = f"BM adicionado com sucesso!"
+    if imported > 0:
+        msg = f"BM adicionado! {imported} conta(s) de anúncio importada(s) automaticamente."
+    return {"id": bid, "status": "success", "message": msg, "accounts_imported": imported}
+
+@app.post("/api/bm/{bm_id}/sync-accounts")
+def sync_bm_accounts(bm_id: str):
+    """Manually re-sync all ad accounts for a BM."""
+    conn = get_db()
+    row = conn.execute("SELECT * FROM business_managers WHERE id=?", (bm_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, "BM não encontrado")
+    d = dict(row)
+    imported = 0
+    try:
+        imported = _sync_bm_accounts(bm_id, d["bm_id"], d["access_token"], conn)
+    except Exception as e:
+        conn.close()
+        raise HTTPException(500, str(e))
+    conn.commit()
+    conn.close()
+    return {"status": "success", "accounts_imported": imported, "message": f"{imported} conta(s) sincronizada(s)."}
 
 @app.put("/api/bm/{bm_id}")
 def update_bm(bm_id: str, data: dict):
@@ -1327,9 +1334,6 @@ def test_bm_connection(data: dict):
     result = verify_meta_token(token, data.get("bm_id", ""))
     if result["valid"]:
         return {"status": "success", "message": f"Conectado como: {result.get('name', 'OK')}"}
-    # Fallback to demo if token looks fake
-    if token.startswith("demo") or token.startswith("test"):
-        return {"status": "success", "message": "Modo demo — conexão simulada!"}
     return {"status": "error", "message": "Token inválido. Verifique o access token."}
 
 # ─── Ad Accounts ──────────────────────────────────────────────────────────────
@@ -1339,8 +1343,6 @@ def list_accounts():
     conn = get_db()
     rows = conn.execute("SELECT * FROM ad_accounts").fetchall()
     conn.close()
-    if not rows:
-        return MOCK_ACCOUNTS
     result = []
     for r in rows:
         d = dict(r)
@@ -1391,8 +1393,6 @@ def test_account_connection(data: dict):
     result = verify_meta_token(token)
     if result["valid"]:
         return {"status": "success", "message": f"Token válido ({result.get('name','')}) — conta pode estar sem campanhas."}
-    if token.startswith("demo") or token.startswith("test"):
-        return {"status": "success", "message": "Modo demo — conexão simulada!"}
     return {"status": "error", "message": "Não foi possível verificar a conta. Verifique o token."}
 
 # ─── API Connections ──────────────────────────────────────────────────────────
@@ -1519,10 +1519,7 @@ def list_campaigns(status: Optional[str] = None):
     accounts = conn.execute("SELECT * FROM ad_accounts").fetchall()
     conn.close()
     if not accounts:
-        data = MOCK_CAMPAIGNS
-        if status:
-            data = [c for c in data if c["status"] == status]
-        return data
+        return []
     # Real accounts: fetch from Meta
     all_campaigns = []
     for acc in accounts:
@@ -1613,8 +1610,6 @@ def list_rules():
     conn = get_db()
     rows = conn.execute("SELECT * FROM rules").fetchall()
     conn.close()
-    if not rows:
-        return MOCK_RULES
     result = []
     for r in rows:
         d = dict(r)
@@ -1716,8 +1711,6 @@ def list_alerts():
     conn = get_db()
     rows = conn.execute("SELECT * FROM alerts WHERE status='active' ORDER BY created_at DESC").fetchall()
     conn.close()
-    if not rows:
-        return MOCK_ALERTS
     return [dict(r) for r in rows]
 
 @app.post("/api/alerts/{alert_id}/ignore")
@@ -1733,15 +1726,30 @@ def ignore_alert(alert_id: str):
 @app.post("/api/reports/generate")
 def generate_report(data: dict):
     days = data.get("days", 7)
+    campaigns = _fetch_all_campaigns_cached()
+    total_invest = sum(c.get("spend", 0) for c in campaigns)
+    total_conv = sum(c.get("conversions", 0) for c in campaigns)
+    total_rev = sum(c.get("revenue", 0) for c in campaigns)
+    avg_roas = round(total_rev / total_invest, 2) if total_invest > 0 else 0
+    avg_cpa = round(total_invest / total_conv, 2) if total_conv > 0 else 0
+    by_acc = {}
+    for c in campaigns:
+        acc = c.get("account", "")
+        if acc not in by_acc:
+            by_acc[acc] = {"name": acc, "spend": 0, "conversions": 0}
+        by_acc[acc]["spend"] += c.get("spend", 0)
+        by_acc[acc]["conversions"] += c.get("conversions", 0)
     return {
         "status": "success",
         "data": {
             "time_series": gen_time_series(days),
             "summary": {
-                "total_invest": 4290.00, "total_conversions": 63,
-                "avg_roas": 3.28, "avg_cpa": 68.10,
+                "total_invest": round(total_invest, 2),
+                "total_conversions": total_conv,
+                "avg_roas": avg_roas,
+                "avg_cpa": avg_cpa,
             },
-            "by_account": MOCK_ACCOUNTS,
+            "by_account": list(by_acc.values()),
         },
     }
 
@@ -1789,7 +1797,7 @@ def get_status():
         (provider == "anthropic" and (bool(anthropic_set) or bool(os.environ.get("ANTHROPIC_API_KEY"))))
     )
     return {
-        "demo_mode": bm_count == 0 and acc_count == 0,
+        "demo_mode": False,
         "bm_count": bm_count,
         "account_count": acc_count,
         "rule_count": rule_count,
