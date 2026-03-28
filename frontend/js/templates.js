@@ -119,6 +119,9 @@ Alpine.data('AccountsPage', function() {
   return {
     accounts: [],
     bms: [],
+    metricsMap: {},
+    metricsLoading: false,
+    metricsPeriod: 'last_7d',
     search: '', filterBm: '', filterStatus: '',
     showModal: false, showHelpAcc: false, testing: false, testResult: null, showToken: false,
     saving: false,
@@ -134,6 +137,32 @@ Alpine.data('AccountsPage', function() {
       const [accs, bms] = await Promise.all([API.get('/api/accounts'), API.get('/api/bm')]);
       if (accs) this.accounts = accs;
       if (bms) this.bms = bms;
+      this.loadMetrics();
+    },
+
+    async loadMetrics() {
+      this.metricsLoading = true;
+      const data = await API.get(`/api/accounts/with-metrics?period=${this.metricsPeriod}`);
+      if (data) {
+        const map = {};
+        data.forEach(a => { map[a.id] = a; });
+        this.metricsMap = map;
+      }
+      this.metricsLoading = false;
+    },
+
+    async setMetricsPeriod(p) {
+      this.metricsPeriod = p;
+      this.metricsMap = {};
+      await this.loadMetrics();
+    },
+
+    m(accId) { return this.metricsMap[accId] || {}; },
+
+    viewAccount(acc) {
+      window._selectedAccountId = acc.id;
+      window._selectedAccountName = acc.name;
+      this.$dispatch('navigate', { page: 'account-detail' });
     },
 
     get filtered() {
@@ -979,12 +1008,24 @@ accounts(s) {
       </button>
     </div>
 
-    <div class="flex items-center gap-3">
-      <p class="text-slate-400 text-sm" x-text="filtered.length+' conta(s) encontrada(s)'"></p>
+    <div class="flex items-center gap-3 flex-wrap">
+      <p class="text-slate-400 text-sm" x-text="filtered.length+' conta(s)'"></p>
       <div class="flex gap-2">
         <span class="badge badge-green"><i class="fas fa-circle text-xs"></i> <span x-text="accounts.filter(a=>a.status==='active').length"></span> ativas</span>
-        <span class="badge badge-red"><i class="fas fa-times-circle text-xs"></i> <span x-text="accounts.filter(a=>a.status==='error').length"></span> com erro</span>
+        <span class="badge badge-red"><i class="fas fa-times-circle text-xs"></i> <span x-text="accounts.filter(a=>a.status==='error').length"></span> erro</span>
       </div>
+      <div x-show="metricsLoading" class="flex items-center gap-1.5 text-xs text-slate-500">
+        <i class="fas fa-circle-notch fa-spin text-blue-400"></i> Carregando...
+      </div>
+    </div>
+
+    <!-- Period selector pills -->
+    <div class="flex items-center gap-1.5 flex-wrap">
+      <span class="text-slate-500 text-xs mr-1">Período:</span>
+      ${[
+        {v:'today',l:'Hoje'},{v:'yesterday',l:'Ontem'},{v:'last_7d',l:'7 dias'},
+        {v:'last_14d',l:'14 dias'},{v:'last_30d',l:'30 dias'},{v:'last_90d',l:'Máximo'},
+      ].map(p=>`<button @click="setMetricsPeriod('${p.v}')" :class="metricsPeriod==='${p.v}'?'bg-blue-600/30 text-blue-300 border-blue-500/50':'text-slate-400 border-slate-700/50 hover:text-slate-300'" class="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all">${p.l}</button>`).join('')}
     </div>
 
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 fade-in-children">
@@ -992,7 +1033,7 @@ accounts(s) {
         <div class="glass rounded-2xl p-4 glass-hover flex flex-col gap-3">
           <div class="flex items-start justify-between gap-2">
             <div class="flex items-center gap-2.5">
-              <span class="text-2xl" x-text="acc.flag||'🌍'"></span>
+              <span class="text-2xl" x-text="acc.flag||flagFor(acc.country)||'🌍'"></span>
               <div class="min-w-0">
                 <p class="text-white font-semibold text-sm leading-tight truncate" x-text="acc.name"></p>
                 <p class="text-slate-500 text-xs font-mono" x-text="acc.account_id"></p>
@@ -1006,24 +1047,28 @@ accounts(s) {
           <div x-show="acc.status==='error'" class="flex items-center gap-1.5 p-2.5 rounded-xl text-xs text-red-300" style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);">
             <i class="fas fa-exclamation-triangle text-red-400"></i> Token expirado ou inválido
           </div>
-          <div x-show="acc.status==='active'" class="grid grid-cols-3 gap-2">
+          <!-- Metrics from with-metrics endpoint -->
+          <div class="grid grid-cols-3 gap-2">
             <div class="text-center p-2 rounded-xl" style="background:rgba(59,130,246,0.08);">
-              <p class="text-blue-400 font-bold text-sm" x-text="'$'+Number(acc.spend||0).toFixed(0)"></p>
+              <p class="text-blue-400 font-bold text-sm" x-text="metricsLoading && !m(acc.id).spend ? '...' : '$'+Number(m(acc.id).spend||0).toFixed(0)"></p>
               <p class="text-slate-500 text-xs">Gasto</p>
             </div>
             <div class="text-center p-2 rounded-xl" style="background:rgba(34,197,94,0.08);">
-              <p class="text-green-400 font-bold text-sm" x-text="acc.conversions||0"></p>
+              <p class="text-green-400 font-bold text-sm" x-text="metricsLoading && !m(acc.id).conversions ? '...' : (m(acc.id).conversions||0)"></p>
               <p class="text-slate-500 text-xs">Conv.</p>
             </div>
             <div class="text-center p-2 rounded-xl" style="background:rgba(245,158,11,0.08);">
-              <p class="text-amber-400 font-bold text-sm" x-text="Number(acc.roas||0).toFixed(1)+'x'"></p>
+              <p class="text-amber-400 font-bold text-sm" x-text="metricsLoading && !m(acc.id).roas ? '...' : Number(m(acc.id).roas||0).toFixed(1)+'x'"></p>
               <p class="text-slate-500 text-xs">ROAS</p>
             </div>
           </div>
-          <p class="text-xs text-slate-500 truncate" x-text="'BM: '+bmName(acc.bm_id)"></p>
+          <div class="flex items-center justify-between">
+            <p class="text-xs text-slate-500 truncate" x-text="'BM: '+bmName(acc.bm_id)"></p>
+            <p class="text-xs text-slate-600" x-text="(m(acc.id).campaign_count||0)+' camp.'"></p>
+          </div>
           <div class="flex gap-1.5 mt-auto pt-1" style="border-top:1px solid rgba(51,65,85,0.3);">
-            <button @click="$dispatch('show-toast',{type:'info',message:'Detalhes de '+acc.name})" class="btn btn-secondary btn-sm flex-1">
-              <i class="fas fa-eye text-xs"></i> Ver
+            <button @click="viewAccount(acc)" class="btn btn-primary btn-sm flex-1">
+              <i class="fas fa-chart-bar text-xs"></i> Ver Detalhe
             </button>
             <button @click="openModal(acc)" class="btn btn-ghost btn-sm px-2.5" title="Editar">
               <i class="fas fa-gear text-xs"></i>

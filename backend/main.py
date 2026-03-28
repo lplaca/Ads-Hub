@@ -355,7 +355,7 @@ def fetch_meta_campaigns(account_id: str, token: str) -> list:
         return []
     return data.get("data", [])
 
-def fetch_meta_insights(campaign_id: str, token: str, date_preset: str = "today") -> dict:
+def fetch_meta_insights(campaign_id: str, token: str, date_preset: str = "last_7d") -> dict:
     """Fetch campaign insights (spend, conversions, ROAS, CTR) from Meta API."""
     data = meta_get(
         f"{campaign_id}/insights",
@@ -1385,15 +1385,210 @@ def test_account_connection(data: dict):
     account_id = data.get("account_id", "")
     if not token or not account_id:
         return {"status": "error", "message": "Token e ID da conta são obrigatórios."}
-    # Try to fetch campaigns from this account
     campaigns = fetch_meta_campaigns(account_id, token)
     if campaigns:
         return {"status": "success", "message": f"Conectado! {len(campaigns)} campanha(s) encontrada(s)."}
-    # Try verifying the token at least
     result = verify_meta_token(token)
     if result["valid"]:
         return {"status": "success", "message": f"Token válido ({result.get('name','')}) — conta pode estar sem campanhas."}
     return {"status": "error", "message": "Não foi possível verificar a conta. Verifique o token."}
+
+
+def _insights_field(period: str, date_from: str = "", date_to: str = "", metrics: str = "spend,impressions,clicks,ctr,actions,action_values") -> str:
+    """Build the Meta API inline insights field string for a period or custom range."""
+    if period == "custom" and date_from and date_to:
+        return f'insights.time_range({{"since":"{date_from}","until":"{date_to}"}}){{{metrics}}}'
+    return f"insights.date_preset({period}){{{metrics}}}"
+
+
+def _parse_campaign_insights(ins: dict) -> dict:
+    """Parse a Meta API insights dict into metrics."""
+    spend = float(ins.get("spend", 0))
+    impressions = int(ins.get("impressions", 0))
+    clicks = int(ins.get("clicks", 0))
+    ctr = float(ins.get("ctr", 0))
+    conversions = 0
+    checkouts = 0
+    revenue = 0.0
+    for action in ins.get("actions", []):
+        if action["action_type"] in ("purchase", "offsite_conversion.fb_pixel_purchase"):
+            conversions += int(float(action.get("value", 0)))
+        if action["action_type"] in ("initiate_checkout", "offsite_conversion.fb_pixel_initiate_checkout"):
+            checkouts += int(float(action.get("value", 0)))
+    for av in ins.get("action_values", []):
+        if av["action_type"] in ("purchase", "offsite_conversion.fb_pixel_purchase"):
+            revenue += float(av.get("value", 0))
+    roas = round(revenue / spend, 2) if spend > 0 else 0
+    cpa = round(spend / conversions, 2) if conversions > 0 else 0
+    return {
+        "spend": spend, "impressions": impressions, "clicks": clicks,
+        "ctr": round(ctr, 2), "conversions": conversions, "checkouts": checkouts,
+        "revenue": revenue, "roas": roas, "cpa": cpa,
+    }
+
+
+@app.get("/api/accounts/with-metrics")
+def accounts_with_metrics(period: str = "last_7d", date_from: str = "", date_to: str = ""):
+    """Return all accounts with aggregated metrics from Meta API for the given period."""
+    conn = get_db()
+    accounts = conn.execute("SELECT * FROM ad_accounts").fetchall()
+    conn.close()
+    ins_field = _insights_field(period, date_from, date_to)
+    result = []
+    for acc in accounts:
+        a = dict(acc)
+        token = a.get("access_token", "")
+        data = meta_get(
+            f"{a['account_id']}/campaigns",
+            token,
+            {
+                "fields": f"id,name,status,{ins_field}",
+                "limit": 200,
+            },
+        )
+        campaigns_raw = data.get("data", []) if "data" in data else []
+        total = {"spend": 0.0, "impressions": 0, "clicks": 0, "conversions": 0, "revenue": 0.0}
+        active_count = 0
+        for c in campaigns_raw:
+            if c.get("status") == "ACTIVE":
+                active_count += 1
+            ins_list = c.get("insights", {}).get("data", [])
+            if ins_list:
+                m = _parse_campaign_insights(ins_list[0])
+                total["spend"] += m["spend"]
+                total["impressions"] += m["impressions"]
+                total["clicks"] += m["clicks"]
+                total["conversions"] += m["conversions"]
+                total["revenue"] += m["revenue"]
+        roas = round(total["revenue"] / total["spend"], 2) if total["spend"] > 0 else 0
+        cpa = round(total["spend"] / total["conversions"], 2) if total["conversions"] > 0 else 0
+        ctr = round(total["clicks"] / total["impressions"] * 100, 2) if total["impressions"] > 0 else 0
+        result.append({
+            "id": a["id"],
+            "name": a["name"],
+            "account_id": a["account_id"],
+            "bm_id": a.get("bm_id"),
+            "country": a.get("country", ""),
+            "status": a.get("status", "active"),
+            "period": period,
+            "spend": total["spend"],
+            "impressions": total["impressions"],
+            "clicks": total["clicks"],
+            "ctr": ctr,
+            "conversions": total["conversions"],
+            "revenue": total["revenue"],
+            "roas": roas,
+            "cpa": cpa,
+            "campaign_count": len(campaigns_raw),
+            "active_campaigns": active_count,
+        })
+    return result
+
+
+@app.get("/api/accounts/{acc_id}/overview")
+def account_overview(acc_id: str, period: str = "last_7d", date_from: str = "", date_to: str = ""):
+    """Full account overview: KPI totals + all campaigns with metrics."""
+    conn = get_db()
+    acc_row = conn.execute("SELECT * FROM ad_accounts WHERE id=?", (acc_id,)).fetchone()
+    conn.close()
+    if not acc_row:
+        raise HTTPException(status_code=404, detail="Conta não encontrada")
+    acc = dict(acc_row)
+    token = acc.get("access_token", "")
+    ins_field = _insights_field(period, date_from, date_to)
+    data = meta_get(
+        f"{acc['account_id']}/campaigns",
+        token,
+        {
+            "fields": f"id,name,status,daily_budget,lifetime_budget,{ins_field}",
+            "limit": 200,
+        },
+    )
+    campaigns_raw = data.get("data", []) if "data" in data else []
+    campaigns = []
+    total = {"spend": 0.0, "impressions": 0, "clicks": 0, "conversions": 0, "revenue": 0.0}
+    for c in campaigns_raw:
+        ins_list = c.get("insights", {}).get("data", [])
+        m = _parse_campaign_insights(ins_list[0]) if ins_list else {
+            "spend": 0, "impressions": 0, "clicks": 0, "ctr": 0,
+            "conversions": 0, "checkouts": 0, "revenue": 0, "roas": 0, "cpa": 0,
+        }
+        total["spend"] += m["spend"]
+        total["impressions"] += m["impressions"]
+        total["clicks"] += m["clicks"]
+        total["conversions"] += m["conversions"]
+        total["revenue"] += m["revenue"]
+        db_raw = c.get("daily_budget")
+        lb_raw = c.get("lifetime_budget")
+        campaigns.append({
+            "id": c["id"],
+            "name": c["name"],
+            "status": c.get("status", "UNKNOWN").lower(),
+            "daily_budget": round(float(db_raw) / 100, 2) if db_raw else None,
+            "lifetime_budget": round(float(lb_raw) / 100, 2) if lb_raw else None,
+            **m,
+        })
+    roas_t = round(total["revenue"] / total["spend"], 2) if total["spend"] > 0 else 0
+    cpa_t = round(total["spend"] / total["conversions"], 2) if total["conversions"] > 0 else 0
+    ctr_t = round(total["clicks"] / total["impressions"] * 100, 2) if total["impressions"] > 0 else 0
+    return {
+        "id": acc["id"],
+        "name": acc["name"],
+        "account_id": acc["account_id"],
+        "bm_id": acc.get("bm_id"),
+        "country": acc.get("country", ""),
+        "status": acc.get("status", "active"),
+        "period": period,
+        "metrics": {
+            "spend": total["spend"],
+            "impressions": total["impressions"],
+            "clicks": total["clicks"],
+            "ctr": ctr_t,
+            "conversions": total["conversions"],
+            "revenue": total["revenue"],
+            "roas": roas_t,
+            "cpa": cpa_t,
+        },
+        "campaigns": campaigns,
+    }
+
+
+@app.get("/api/accounts/{acc_id}/campaigns/{camp_id}/adsets")
+def campaign_adsets(acc_id: str, camp_id: str, period: str = "last_7d", date_from: str = "", date_to: str = ""):
+    """Return all ad sets for a campaign with metrics."""
+    conn = get_db()
+    acc_row = conn.execute("SELECT * FROM ad_accounts WHERE id=?", (acc_id,)).fetchone()
+    conn.close()
+    if not acc_row:
+        raise HTTPException(status_code=404, detail="Conta não encontrada")
+    token = dict(acc_row).get("access_token", "")
+    ins_field = _insights_field(period, date_from, date_to)
+    data = meta_get(
+        f"{camp_id}/adsets",
+        token,
+        {
+            "fields": f"id,name,status,daily_budget,{ins_field}",
+            "limit": 200,
+        },
+    )
+    adsets_raw = data.get("data", []) if "data" in data else []
+    adsets = []
+    for s in adsets_raw:
+        ins_list = s.get("insights", {}).get("data", [])
+        m = _parse_campaign_insights(ins_list[0]) if ins_list else {
+            "spend": 0, "impressions": 0, "clicks": 0, "ctr": 0,
+            "conversions": 0, "checkouts": 0, "revenue": 0, "roas": 0, "cpa": 0,
+        }
+        db_raw = s.get("daily_budget")
+        adsets.append({
+            "id": s["id"],
+            "name": s["name"],
+            "status": s.get("status", "UNKNOWN").lower(),
+            "daily_budget": round(float(db_raw) / 100, 2) if db_raw else None,
+            **m,
+        })
+    return adsets
+
 
 # ─── API Connections ──────────────────────────────────────────────────────────
 
@@ -1911,7 +2106,7 @@ def get_campaigns_for_agent() -> tuple:
         acc_d = dict(acc)
         meta_camps = fetch_meta_campaigns(acc_d["account_id"], acc_d["access_token"])
         for mc in meta_camps:
-            insights = fetch_meta_insights(mc["id"], acc_d["access_token"], "today")
+            insights = fetch_meta_insights(mc["id"], acc_d["access_token"], "last_7d")
             campaigns.append({
                 "id": mc["id"], "name": mc["name"],
                 "account": acc_d["name"], "account_id": acc_d["id"],

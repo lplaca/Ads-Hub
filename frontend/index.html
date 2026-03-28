@@ -128,7 +128,7 @@
         <p class="text-slate-600 text-xs font-semibold uppercase tracking-widest">Gestão</p>
       </div>
       <div x-show="sidebarCollapsed" class="my-1.5 mx-2 border-t border-slate-700/50"></div>
-      <template x-for="item in navItems.filter(n=>n.group==='management')" :key="item.id">
+      <template x-for="item in navItems.filter(n=>n.group==='management' && n.id!=='account-detail')" :key="item.id">
         <button
           @click="navigate(item.id)"
           :class="currentPage === item.id
@@ -347,6 +347,11 @@
           <div x-html="renderPage()"></div>
         </div>
 
+        <!-- ACCOUNT DETAIL -->
+        <div x-show="currentPage === 'account-detail'" x-data="AccountDetailPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
       </div><!-- /max-w -->
     </main><!-- /main -->
   </div><!-- /main area -->
@@ -390,6 +395,7 @@
 <script src="/static/js/pages-launcher.js?v=1"></script>
 <script src="/static/js/pages-manual.js?v=1"></script>
 <script src="/static/js/pages-connections.js?v=1"></script>
+<script src="/static/js/pages-account-detail.js?v=1"></script>
 
 </body>
 </html>

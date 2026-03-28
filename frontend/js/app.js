@@ -86,6 +86,8 @@ const NAV = [
   { id:'quickactions', label:'Ações Rápidas',     icon:'fas fa-bolt',                  subtitle:'Pause ou ative campanhas rapidamente', group:'management' },
   { id:'settings',     label:'Configurações',     icon:'fas fa-gear',                  subtitle:'Preferências e integrações', group:'management' },
   { id:'manual',       label:'Manual',            icon:'fas fa-book-open',             subtitle:'Guia completo passo a passo da plataforma', group:'management' },
+  // hidden (navigated programmatically)
+  { id:'account-detail', label:'Detalhe da Conta', icon:'fas fa-chart-bar', subtitle:'Campanhas e conjuntos de anúncios', group:'management' },
 ];
 
 // ── MAIN APP ──────────────────────────────────────────────────────────────────
