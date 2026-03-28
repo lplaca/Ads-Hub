@@ -1401,6 +1401,53 @@ def _insights_field(period: str, date_from: str = "", date_to: str = "", metrics
     return f"insights.date_preset({period}){{{metrics}}}"
 
 
+def _insights_params(period: str, date_from: str = "", date_to: str = "") -> dict:
+    """Build query params for a standalone /insights call (not inline)."""
+    fields = "spend,impressions,clicks,ctr,actions,action_values"
+    if period == "custom" and date_from and date_to:
+        return {"fields": fields, "time_range": json.dumps({"since": date_from, "until": date_to})}
+    return {"fields": fields, "date_preset": period}
+
+
+def _fetch_account_insights(account_id: str, token: str, period: str, date_from: str = "", date_to: str = "") -> dict:
+    """Fetch aggregated account-level insights from Meta API."""
+    params = _insights_params(period, date_from, date_to)
+    data = meta_get(f"{account_id}/insights", token, params)
+    rows = data.get("data", [])
+    return _parse_campaign_insights(rows[0]) if rows else {
+        "spend": 0, "impressions": 0, "clicks": 0, "ctr": 0,
+        "conversions": 0, "checkouts": 0, "revenue": 0, "roas": 0, "cpa": 0,
+    }
+
+
+def _fetch_campaign_insights_breakdown(account_id: str, token: str, period: str, date_from: str = "", date_to: str = "") -> dict:
+    """Fetch per-campaign insights breakdown from account. Returns {campaign_id: metrics_dict}."""
+    params = _insights_params(period, date_from, date_to)
+    params["level"] = "campaign"
+    params["fields"] = "campaign_id,spend,impressions,clicks,ctr,actions,action_values"
+    data = meta_get(f"{account_id}/insights", token, params)
+    result = {}
+    for row in data.get("data", []):
+        cid = row.get("campaign_id")
+        if cid:
+            result[cid] = _parse_campaign_insights(row)
+    return result
+
+
+def _fetch_adset_insights_breakdown(campaign_id: str, token: str, period: str, date_from: str = "", date_to: str = "") -> dict:
+    """Fetch per-adset insights breakdown from campaign. Returns {adset_id: metrics_dict}."""
+    params = _insights_params(period, date_from, date_to)
+    params["level"] = "adset"
+    params["fields"] = "adset_id,spend,impressions,clicks,ctr,actions,action_values"
+    data = meta_get(f"{campaign_id}/insights", token, params)
+    result = {}
+    for row in data.get("data", []):
+        sid = row.get("adset_id")
+        if sid:
+            result[sid] = _parse_campaign_insights(row)
+    return result
+
+
 def _parse_campaign_insights(ins: dict) -> dict:
     """Parse a Meta API insights dict into metrics."""
     spend = float(ins.get("spend", 0))
@@ -1433,36 +1480,17 @@ def accounts_with_metrics(period: str = "last_7d", date_from: str = "", date_to:
     conn = get_db()
     accounts = conn.execute("SELECT * FROM ad_accounts").fetchall()
     conn.close()
-    ins_field = _insights_field(period, date_from, date_to)
     result = []
     for acc in accounts:
         a = dict(acc)
         token = a.get("access_token", "")
-        data = meta_get(
-            f"{a['account_id']}/campaigns",
-            token,
-            {
-                "fields": f"id,name,status,{ins_field}",
-                "limit": 200,
-            },
-        )
-        campaigns_raw = data.get("data", []) if "data" in data else []
-        total = {"spend": 0.0, "impressions": 0, "clicks": 0, "conversions": 0, "revenue": 0.0}
-        active_count = 0
-        for c in campaigns_raw:
-            if c.get("status") == "ACTIVE":
-                active_count += 1
-            ins_list = c.get("insights", {}).get("data", [])
-            if ins_list:
-                m = _parse_campaign_insights(ins_list[0])
-                total["spend"] += m["spend"]
-                total["impressions"] += m["impressions"]
-                total["clicks"] += m["clicks"]
-                total["conversions"] += m["conversions"]
-                total["revenue"] += m["revenue"]
-        roas = round(total["revenue"] / total["spend"], 2) if total["spend"] > 0 else 0
-        cpa = round(total["spend"] / total["conversions"], 2) if total["conversions"] > 0 else 0
-        ctr = round(total["clicks"] / total["impressions"] * 100, 2) if total["impressions"] > 0 else 0
+        # Fetch all campaigns (for count) — no insights filter, so all campaigns returned
+        camps_data = meta_get(f"{a['account_id']}/campaigns", token, {"fields": "id,status", "limit": 200})
+        camps_raw = camps_data.get("data", []) if "data" in camps_data else []
+        campaign_count = len(camps_raw)
+        active_count = sum(1 for c in camps_raw if c.get("status") == "ACTIVE")
+        # Fetch account-level aggregated insights (separate call — always returns data)
+        m = _fetch_account_insights(a["account_id"], token, period, date_from, date_to)
         result.append({
             "id": a["id"],
             "name": a["name"],
@@ -1471,15 +1499,15 @@ def accounts_with_metrics(period: str = "last_7d", date_from: str = "", date_to:
             "country": a.get("country", ""),
             "status": a.get("status", "active"),
             "period": period,
-            "spend": total["spend"],
-            "impressions": total["impressions"],
-            "clicks": total["clicks"],
-            "ctr": ctr,
-            "conversions": total["conversions"],
-            "revenue": total["revenue"],
-            "roas": roas,
-            "cpa": cpa,
-            "campaign_count": len(campaigns_raw),
+            "spend": m["spend"],
+            "impressions": m["impressions"],
+            "clicks": m["clicks"],
+            "ctr": m["ctr"],
+            "conversions": m["conversions"],
+            "revenue": m["revenue"],
+            "roas": m["roas"],
+            "cpa": m["cpa"],
+            "campaign_count": campaign_count,
             "active_campaigns": active_count,
         })
     return result
@@ -1495,29 +1523,22 @@ def account_overview(acc_id: str, period: str = "last_7d", date_from: str = "", 
         raise HTTPException(status_code=404, detail="Conta não encontrada")
     acc = dict(acc_row)
     token = acc.get("access_token", "")
-    ins_field = _insights_field(period, date_from, date_to)
-    data = meta_get(
-        f"{acc['account_id']}/campaigns",
-        token,
-        {
-            "fields": f"id,name,status,daily_budget,lifetime_budget,{ins_field}",
-            "limit": 200,
-        },
-    )
-    campaigns_raw = data.get("data", []) if "data" in data else []
+    acct_id = acc["account_id"]
+    # 1. Fetch ALL campaigns (no insights filter — returns all regardless of spend)
+    camps_data = meta_get(acct_id + "/campaigns", token, {
+        "fields": "id,name,status,daily_budget,lifetime_budget", "limit": 200
+    })
+    campaigns_raw = camps_data.get("data", []) if "data" in camps_data else []
+    # 2. Fetch per-campaign insights breakdown (only campaigns with activity)
+    camp_ins = _fetch_campaign_insights_breakdown(acct_id, token, period, date_from, date_to)
+    # 3. Fetch account-level totals (more reliable than summing campaigns)
+    total_m = _fetch_account_insights(acct_id, token, period, date_from, date_to)
+    # 4. Build campaign list merging all campaigns + their insights (0 if no activity)
+    empty_m = {"spend": 0, "impressions": 0, "clicks": 0, "ctr": 0,
+               "conversions": 0, "checkouts": 0, "revenue": 0, "roas": 0, "cpa": 0}
     campaigns = []
-    total = {"spend": 0.0, "impressions": 0, "clicks": 0, "conversions": 0, "revenue": 0.0}
     for c in campaigns_raw:
-        ins_list = c.get("insights", {}).get("data", [])
-        m = _parse_campaign_insights(ins_list[0]) if ins_list else {
-            "spend": 0, "impressions": 0, "clicks": 0, "ctr": 0,
-            "conversions": 0, "checkouts": 0, "revenue": 0, "roas": 0, "cpa": 0,
-        }
-        total["spend"] += m["spend"]
-        total["impressions"] += m["impressions"]
-        total["clicks"] += m["clicks"]
-        total["conversions"] += m["conversions"]
-        total["revenue"] += m["revenue"]
+        m = camp_ins.get(c["id"], empty_m)
         db_raw = c.get("daily_budget")
         lb_raw = c.get("lifetime_budget")
         campaigns.append({
@@ -1528,27 +1549,17 @@ def account_overview(acc_id: str, period: str = "last_7d", date_from: str = "", 
             "lifetime_budget": round(float(lb_raw) / 100, 2) if lb_raw else None,
             **m,
         })
-    roas_t = round(total["revenue"] / total["spend"], 2) if total["spend"] > 0 else 0
-    cpa_t = round(total["spend"] / total["conversions"], 2) if total["conversions"] > 0 else 0
-    ctr_t = round(total["clicks"] / total["impressions"] * 100, 2) if total["impressions"] > 0 else 0
+    # Sort by spend desc
+    campaigns.sort(key=lambda x: x["spend"], reverse=True)
     return {
         "id": acc["id"],
         "name": acc["name"],
-        "account_id": acc["account_id"],
+        "account_id": acct_id,
         "bm_id": acc.get("bm_id"),
         "country": acc.get("country", ""),
         "status": acc.get("status", "active"),
         "period": period,
-        "metrics": {
-            "spend": total["spend"],
-            "impressions": total["impressions"],
-            "clicks": total["clicks"],
-            "ctr": ctr_t,
-            "conversions": total["conversions"],
-            "revenue": total["revenue"],
-            "roas": roas_t,
-            "cpa": cpa_t,
-        },
+        "metrics": total_m,
         "campaigns": campaigns,
     }
 
@@ -1562,23 +1573,16 @@ def campaign_adsets(acc_id: str, camp_id: str, period: str = "last_7d", date_fro
     if not acc_row:
         raise HTTPException(status_code=404, detail="Conta não encontrada")
     token = dict(acc_row).get("access_token", "")
-    ins_field = _insights_field(period, date_from, date_to)
-    data = meta_get(
-        f"{camp_id}/adsets",
-        token,
-        {
-            "fields": f"id,name,status,daily_budget,{ins_field}",
-            "limit": 200,
-        },
-    )
+    # 1. Fetch ALL adsets (no insights filter)
+    data = meta_get(f"{camp_id}/adsets", token, {"fields": "id,name,status,daily_budget", "limit": 200})
     adsets_raw = data.get("data", []) if "data" in data else []
+    # 2. Fetch per-adset insights breakdown
+    adset_ins = _fetch_adset_insights_breakdown(camp_id, token, period, date_from, date_to)
+    empty_m = {"spend": 0, "impressions": 0, "clicks": 0, "ctr": 0,
+               "conversions": 0, "checkouts": 0, "revenue": 0, "roas": 0, "cpa": 0}
     adsets = []
     for s in adsets_raw:
-        ins_list = s.get("insights", {}).get("data", [])
-        m = _parse_campaign_insights(ins_list[0]) if ins_list else {
-            "spend": 0, "impressions": 0, "clicks": 0, "ctr": 0,
-            "conversions": 0, "checkouts": 0, "revenue": 0, "roas": 0, "cpa": 0,
-        }
+        m = adset_ins.get(s["id"], empty_m)
         db_raw = s.get("daily_budget")
         adsets.append({
             "id": s["id"],
@@ -1587,6 +1591,7 @@ def campaign_adsets(acc_id: str, camp_id: str, period: str = "last_7d", date_fro
             "daily_budget": round(float(db_raw) / 100, 2) if db_raw else None,
             **m,
         })
+    adsets.sort(key=lambda x: x["spend"], reverse=True)
     return adsets
 
 
