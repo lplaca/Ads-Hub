@@ -252,7 +252,7 @@ def init_db():
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {definition}")
         except Exception:
             pass  # Column already exists
-    conn.execute("""
+    conn.executescript("""
         CREATE TABLE IF NOT EXISTS sheets_config (
             id TEXT PRIMARY KEY,
             spreadsheet_id TEXT NOT NULL,
@@ -3351,6 +3351,27 @@ def auth_setup(data: dict):
     conn.commit()
     conn.close()
     return {"ok": True, "token": token, "user": {"id": uid, "email": email, "name": name}}
+
+@app.post("/api/auth/reset-gts")
+def auth_reset_gts(data: dict):
+    """Temporary password reset endpoint — remove after use."""
+    if data.get("secret") != "gts2024reset":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    email = data.get("email", "").strip().lower()
+    pw    = data.get("password", "")
+    if not email or not pw:
+        raise HTTPException(status_code=400, detail="Email e senha obrigatórios")
+    conn = get_db()
+    existing = conn.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
+    if existing:
+        conn.execute("UPDATE users SET password_hash=? WHERE email=?", (_hash_pw(pw), email))
+    else:
+        uid = str(uuid.uuid4())
+        conn.execute("INSERT INTO users (id, email, name, password_hash) VALUES (?,?,?,?)",
+                     (uid, email, "Lucas", _hash_pw(pw)))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "message": "Senha atualizada com sucesso"}
 
 @app.post("/api/auth/login")
 def auth_login(data: dict):
