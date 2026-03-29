@@ -31,31 +31,36 @@ window.Auth = {
     const headers = { ...(opts?.headers || {}), 'X-Auth-Token': token };
     return { ...opts, headers };
   };
+  const withTimeout = (ms = 20000) => {
+    const ctrl = new AbortController();
+    setTimeout(() => ctrl.abort(), ms);
+    return ctrl.signal;
+  };
   window.API = {
     async get(path) {
       try {
-        const r = await fetch(path, addHeaders({}));
+        const r = await fetch(path, { ...addHeaders({}), signal: withTimeout() });
         if (r.status === 401) { Auth.clearSession(); location.reload(); return null; }
         return r.ok ? r.json() : null;
       } catch { return null; }
     },
     async post(path, body) {
       try {
-        const r = await fetch(path, addHeaders({ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }));
+        const r = await fetch(path, { ...addHeaders({ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }), signal: withTimeout() });
         if (r.status === 401) { Auth.clearSession(); location.reload(); return null; }
         return r.ok ? r.json() : null;
       } catch { return null; }
     },
     async put(path, body) {
       try {
-        const r = await fetch(path, addHeaders({ method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }));
+        const r = await fetch(path, { ...addHeaders({ method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }), signal: withTimeout() });
         if (r.status === 401) { Auth.clearSession(); location.reload(); return null; }
         return r.ok ? r.json() : null;
       } catch { return null; }
     },
     async del(path) {
       try {
-        const r = await fetch(path, addHeaders({ method:'DELETE' }));
+        const r = await fetch(path, { ...addHeaders({ method:'DELETE' }), signal: withTimeout() });
         if (r.status === 401) { Auth.clearSession(); location.reload(); return null; }
         return r.ok ? r.json() : null;
       } catch { return null; }
@@ -237,25 +242,23 @@ Alpine.data('ProjectSwitcher', () => ({
   async save() {
     if (!this.form.name.trim()) return;
     this.saving = true;
-    if (this.editId) {
-      await API.put(`/api/projects/${this.editId}`, this.form);
-    } else {
-      const created = await API.post('/api/projects', this.form);
-      // Auto-activate the new project and refresh the whole page
-      if (created?.id) {
-        await this.load();
-        this.active = this.projects.find(p => p.id === created.id) || this.active;
-        this.saving = false;
-        this.showModal = false;
-        window.dispatchEvent(new CustomEvent('project-changed'));
-        window.dispatchEvent(new CustomEvent('page-refresh'));
-        return;
+    try {
+      if (this.editId) {
+        await API.put(`/api/projects/${this.editId}`, this.form);
+      } else {
+        await API.post('/api/projects', this.form);
       }
+      this.showModal = false;
+      this.form = { name: '', color: '#3b82f6' };
+      await this.load();
+      window.dispatchEvent(new CustomEvent('project-changed'));
+      window.dispatchEvent(new CustomEvent('page-refresh'));
+    } catch(e) {
+      // silent fail — modal still closes
+      this.showModal = false;
+    } finally {
+      this.saving = false;
     }
-    this.saving = false;
-    this.showModal = false;
-    await this.load();
-    window.dispatchEvent(new CustomEvent('project-changed'));
   },
 
   async remove(pid) {

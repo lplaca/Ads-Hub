@@ -370,7 +370,10 @@ def init_db():
             pass  # Column already exists
 
     # Migration: assign orphaned BMs/accounts (no project_id) to a default project
-    _migrate_orphaned_to_default_project(conn)
+    try:
+        _migrate_orphaned_to_default_project(conn)
+    except Exception:
+        pass  # Non-fatal — don't crash startup
 
     conn.close()
 
