@@ -368,13 +368,67 @@ def init_db():
             conn.commit()
         except Exception:
             pass  # Column already exists
+
+    # Migration: assign orphaned BMs/accounts (no project_id) to a default project
+    _migrate_orphaned_to_default_project(conn)
+
     conn.close()
+
+def _migrate_orphaned_to_default_project(conn):
+    """If there are BMs or accounts with no project_id, assign them to the first project
+    (or create a 'Projeto Padrão' if none exists). Runs at startup, idempotent."""
+    orphan_bms = conn.execute(
+        "SELECT id FROM business_managers WHERE project_id IS NULL OR project_id=''"
+    ).fetchall()
+    orphan_accs = conn.execute(
+        "SELECT id FROM ad_accounts WHERE project_id IS NULL OR project_id=''"
+    ).fetchall()
+    if not orphan_bms and not orphan_accs:
+        return  # Nothing to migrate
+
+    # Find or create a default project
+    default_pid = None
+    first_project = conn.execute("SELECT id FROM projects ORDER BY created_at LIMIT 1").fetchone()
+    if first_project:
+        default_pid = first_project["id"]
+    else:
+        default_pid = str(uuid.uuid4())
+        conn.execute(
+            "INSERT INTO projects (id, name, color) VALUES (?,?,?)",
+            (default_pid, "Projeto Padrão", "#3b82f6")
+        )
+        # Auto-activate if no active project
+        active = conn.execute("SELECT value FROM settings WHERE key='active_project_id'").fetchone()
+        if not active or not active["value"]:
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key,value) VALUES ('active_project_id',?)",
+                (default_pid,)
+            )
+
+    if orphan_bms:
+        conn.execute(
+            "UPDATE business_managers SET project_id=? WHERE project_id IS NULL OR project_id=''",
+            (default_pid,)
+        )
+    if orphan_accs:
+        conn.execute(
+            "UPDATE ad_accounts SET project_id=? WHERE project_id IS NULL OR project_id=''",
+            (default_pid,)
+        )
+    conn.commit()
 
 def get_setting(key: str, default: str = "") -> str:
     conn = get_db()
     row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
     conn.close()
     return row["value"] if row else default
+
+def _get_active_accounts(conn) -> list:
+    """Return ad accounts filtered by the currently active project."""
+    active = get_setting("active_project_id", "")
+    if active:
+        return conn.execute("SELECT * FROM ad_accounts WHERE project_id=?", (active,)).fetchall()
+    return conn.execute("SELECT * FROM ad_accounts").fetchall()
 
 # ─── META API LAYER ────────────────────────────────────────────────────────────
 
@@ -853,24 +907,24 @@ def fetch_bm_ad_accounts(bm_id: str, token: str) -> list:
             unique.append(a)
     return unique
 
-def _sync_bm_accounts(bm_row_id: str, bm_id: str, token: str, conn) -> int:
+def _sync_bm_accounts(bm_row_id: str, bm_id: str, token: str, conn, project_id: str = "") -> int:
     """Fetch and upsert all accounts for a BM. Returns count of accounts imported."""
     raw_accounts = fetch_bm_ad_accounts(bm_id, token)
     count = 0
     for ra in raw_accounts:
         act_id = ra["id"].replace("act_", "")
-        existing = conn.execute("SELECT id FROM ad_accounts WHERE account_id=?", (f"act_{act_id}",)).fetchone()
+        existing = conn.execute("SELECT id, project_id FROM ad_accounts WHERE account_id=?", (f"act_{act_id}",)).fetchone()
         status = _ACCT_STATUS_MAP.get(ra.get("account_status", 1), "active")
         if existing:
             conn.execute(
-                "UPDATE ad_accounts SET name=?, bm_id=?, status=? WHERE account_id=?",
-                (ra.get("name", f"act_{act_id}"), bm_row_id, status, f"act_{act_id}")
+                "UPDATE ad_accounts SET name=?, bm_id=?, status=?, project_id=? WHERE account_id=?",
+                (ra.get("name", f"act_{act_id}"), bm_row_id, status, project_id or existing["project_id"] or "", f"act_{act_id}")
             )
         else:
             conn.execute(
-                "INSERT INTO ad_accounts (id, name, account_id, bm_id, country, access_token, status) VALUES (?,?,?,?,?,?,?)",
+                "INSERT INTO ad_accounts (id, name, account_id, bm_id, country, access_token, status, project_id) VALUES (?,?,?,?,?,?,?,?)",
                 (str(uuid.uuid4()), ra.get("name", f"act_{act_id}"), f"act_{act_id}",
-                 bm_row_id, "", token, status)
+                 bm_row_id, "", token, status, project_id)
             )
             count += 1
     return count
@@ -915,7 +969,7 @@ def run_rules_engine() -> dict:
     """
     conn = get_db()
     rules_rows = conn.execute("SELECT * FROM rules WHERE enabled=1").fetchall()
-    accounts_rows = conn.execute("SELECT * FROM ad_accounts").fetchall()
+    accounts_rows = _get_active_accounts(conn)
     conn.close()
 
     rules = []
@@ -1176,7 +1230,7 @@ def _fetch_all_campaigns_cached(ttl: int = 300):
         return _dashboard_cache["data"]
 
     conn = get_db()
-    accounts = conn.execute("SELECT * FROM ad_accounts").fetchall()
+    accounts = _get_active_accounts(conn)
     conn.close()
     if not accounts:
         return []
@@ -1282,7 +1336,7 @@ def list_bms(project_id: str = ""):
     conn = get_db()
     active_project = project_id or get_setting("active_project_id", "")
     if active_project:
-        rows = conn.execute("SELECT * FROM business_managers WHERE project_id=? OR project_id IS NULL OR project_id=''", (active_project,)).fetchall()
+        rows = conn.execute("SELECT * FROM business_managers WHERE project_id=?", (active_project,)).fetchall()
     else:
         rows = conn.execute("SELECT * FROM business_managers").fetchall()
     conn.close()
@@ -1302,10 +1356,10 @@ def add_bm(data: dict):
         "INSERT INTO business_managers (id, name, bm_id, access_token, project_id) VALUES (?,?,?,?,?)",
         (bid, data["name"], data["bm_id"], data["access_token"], project_id),
     )
-    # Auto-sync ad accounts linked to this BM
+    # Auto-sync ad accounts linked to this BM (inherit project_id)
     imported = 0
     try:
-        imported = _sync_bm_accounts(bid, data["bm_id"], data["access_token"], conn)
+        imported = _sync_bm_accounts(bid, data["bm_id"], data["access_token"], conn, project_id)
     except Exception:
         pass
     conn.commit()
@@ -1326,7 +1380,7 @@ def sync_bm_accounts(bm_id: str):
     d = dict(row)
     imported = 0
     try:
-        imported = _sync_bm_accounts(bm_id, d["bm_id"], d["access_token"], conn)
+        imported = _sync_bm_accounts(bm_id, d["bm_id"], d["access_token"], conn, d.get("project_id", ""))
     except Exception as e:
         conn.close()
         raise HTTPException(500, str(e))
@@ -1370,7 +1424,7 @@ def test_bm_connection(data: dict):
 @app.get("/api/accounts")
 def list_accounts():
     conn = get_db()
-    rows = conn.execute("SELECT * FROM ad_accounts").fetchall()
+    rows = _get_active_accounts(conn)
     conn.close()
     result = []
     for r in rows:
@@ -1383,9 +1437,10 @@ def list_accounts():
 def add_account(data: dict):
     conn = get_db()
     aid = str(uuid.uuid4())
+    project_id = data.get("project_id") or get_setting("active_project_id", "")
     conn.execute(
-        "INSERT INTO ad_accounts (id, name, account_id, bm_id, country, access_token) VALUES (?,?,?,?,?,?)",
-        (aid, data["name"], data["account_id"], data.get("bm_id"), data.get("country", "BR"), data["access_token"]),
+        "INSERT INTO ad_accounts (id, name, account_id, bm_id, country, access_token, project_id) VALUES (?,?,?,?,?,?,?)",
+        (aid, data["name"], data["account_id"], data.get("bm_id"), data.get("country", "BR"), data["access_token"], project_id),
     )
     conn.commit()
     conn.close()
@@ -1603,7 +1658,7 @@ def _parse_campaign_insights(ins: dict) -> dict:
 def accounts_with_metrics(period: str = "last_7d", date_from: str = "", date_to: str = ""):
     """Return all accounts with aggregated metrics from Meta API for the given period."""
     conn = get_db()
-    accounts = conn.execute("SELECT * FROM ad_accounts").fetchall()
+    accounts = _get_active_accounts(conn)
     conn.close()
     result = []
     for acc in accounts:
@@ -1929,7 +1984,7 @@ def live_summary(period: str = "today"):
     """Lightweight live poll: returns aggregated totals for all accounts.
     Called by the frontend every N seconds to keep metrics fresh."""
     conn = get_db()
-    accounts = conn.execute("SELECT * FROM ad_accounts").fetchall()
+    accounts = _get_active_accounts(conn)
     conn.close()
     totals = dict(_EMPTY_METRICS)
     account_data = []
@@ -1952,7 +2007,7 @@ def live_summary(period: str = "today"):
 @app.get("/api/campaigns")
 def list_campaigns(status: Optional[str] = None, period: str = "last_7d"):
     conn = get_db()
-    accounts = conn.execute("SELECT * FROM ad_accounts").fetchall()
+    accounts = _get_active_accounts(conn)
     conn.close()
     if not accounts:
         return []
@@ -1980,7 +2035,7 @@ def list_campaigns(status: Optional[str] = None, period: str = "last_7d"):
 @app.post("/api/campaigns/{cid}/pause")
 def pause_campaign(cid: str):
     conn = get_db()
-    accounts = conn.execute("SELECT * FROM ad_accounts").fetchall()
+    accounts = _get_active_accounts(conn)
     conn.close()
     if not accounts:
         return {"status": "success", "message": "Campanha pausada! (modo demo)"}
@@ -1994,7 +2049,7 @@ def pause_campaign(cid: str):
 @app.post("/api/campaigns/{cid}/activate")
 def activate_campaign(cid: str):
     conn = get_db()
-    accounts = conn.execute("SELECT * FROM ad_accounts").fetchall()
+    accounts = _get_active_accounts(conn)
     conn.close()
     if not accounts:
         return {"status": "success", "message": "Campanha ativada! (modo demo)"}
@@ -2008,7 +2063,7 @@ def activate_campaign(cid: str):
 def bulk_pause(data: dict):
     ids = data.get("ids", [])
     conn = get_db()
-    accounts = conn.execute("SELECT * FROM ad_accounts").fetchall()
+    accounts = _get_active_accounts(conn)
     conn.close()
     if not accounts:
         return {"status": "success", "message": f"{len(ids)} campanha(s) pausada(s)! (modo demo)"}
@@ -2024,7 +2079,7 @@ def bulk_pause(data: dict):
 def bulk_activate(data: dict):
     ids = data.get("ids", [])
     conn = get_db()
-    accounts = conn.execute("SELECT * FROM ad_accounts").fetchall()
+    accounts = _get_active_accounts(conn)
     conn.close()
     if not accounts:
         return {"status": "success", "message": f"{len(ids)} campanha(s) ativada(s)! (modo demo)"}
@@ -2334,7 +2389,7 @@ Responda APENAS com JSON válido (sem markdown, sem explicações fora do JSON):
 def get_campaigns_for_agent() -> tuple:
     """Return (campaigns_list, is_demo) with current metrics."""
     conn = get_db()
-    accounts = conn.execute("SELECT * FROM ad_accounts").fetchall()
+    accounts = _get_active_accounts(conn)
     conn.close()
     is_demo = len(accounts) == 0
     if is_demo:
@@ -3044,7 +3099,7 @@ def startup():
 def _take_campaign_snapshot() -> dict:
     """Snapshot all campaigns with current status and budget."""
     conn = get_db()
-    accounts = conn.execute("SELECT * FROM ad_accounts").fetchall()
+    accounts = _get_active_accounts(conn)
     conn.close()
     snapshot = {}
     for acc in accounts:
@@ -3164,7 +3219,7 @@ def session_finish(sid: str):
     # Also fetch current metrics for all accounts
     metrics = {}
     conn = get_db()
-    accounts = conn.execute("SELECT * FROM ad_accounts").fetchall()
+    accounts = _get_active_accounts(conn)
     conn.close()
     for acc in accounts:
         acc_d = dict(acc)
@@ -3352,26 +3407,6 @@ def auth_setup(data: dict):
     conn.close()
     return {"ok": True, "token": token, "user": {"id": uid, "email": email, "name": name}}
 
-@app.post("/api/auth/reset-gts")
-def auth_reset_gts(data: dict):
-    """Temporary password reset endpoint — remove after use."""
-    if data.get("secret") != "gts2024reset":
-        raise HTTPException(status_code=403, detail="Forbidden")
-    email = data.get("email", "").strip().lower()
-    pw    = data.get("password", "")
-    if not email or not pw:
-        raise HTTPException(status_code=400, detail="Email e senha obrigatórios")
-    conn = get_db()
-    existing = conn.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
-    if existing:
-        conn.execute("UPDATE users SET password_hash=? WHERE email=?", (_hash_pw(pw), email))
-    else:
-        uid = str(uuid.uuid4())
-        conn.execute("INSERT INTO users (id, email, name, password_hash) VALUES (?,?,?,?)",
-                     (uid, email, "Lucas", _hash_pw(pw)))
-    conn.commit()
-    conn.close()
-    return {"ok": True, "message": "Senha atualizada com sucesso"}
 
 @app.post("/api/auth/login")
 def auth_login(data: dict):
@@ -3457,13 +3492,11 @@ def create_project(data: dict):
     pid = str(uuid.uuid4())
     conn = get_db()
     conn.execute("INSERT INTO projects (id, name, color) VALUES (?,?,?)", (pid, name, color))
-    # If first project, auto-activate
-    count = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
-    if count == 1:
-        conn.execute("INSERT OR REPLACE INTO settings (key,value) VALUES ('active_project_id',?)", (pid,))
+    # Auto-activate newly created project
+    conn.execute("INSERT OR REPLACE INTO settings (key,value) VALUES ('active_project_id',?)", (pid,))
     conn.commit()
     conn.close()
-    return {"id": pid, "name": name, "color": color}
+    return {"id": pid, "name": name, "color": color, "is_active": True}
 
 @app.put("/api/projects/{pid}")
 def update_project(pid: str, data: dict):

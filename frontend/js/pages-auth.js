@@ -240,7 +240,17 @@ Alpine.data('ProjectSwitcher', () => ({
     if (this.editId) {
       await API.put(`/api/projects/${this.editId}`, this.form);
     } else {
-      await API.post('/api/projects', this.form);
+      const created = await API.post('/api/projects', this.form);
+      // Auto-activate the new project and refresh the whole page
+      if (created?.id) {
+        await this.load();
+        this.active = this.projects.find(p => p.id === created.id) || this.active;
+        this.saving = false;
+        this.showModal = false;
+        window.dispatchEvent(new CustomEvent('project-changed'));
+        window.dispatchEvent(new CustomEvent('page-refresh'));
+        return;
+      }
     }
     this.saving = false;
     this.showModal = false;
