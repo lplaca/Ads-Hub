@@ -713,16 +713,85 @@ Alpine.data('SettingsPage', function() {
       emailAddr:'', slackWebhook:'', whatsappNumber:'',
     },
     saving: false,
+    // per-project sync
+    activePid: null,
+    activeProject: null,
+    projectIntegrations: {},
+    integrationsLoaded: false,
+    syncLoading: {notion_products: false, clickup: false, auto_products: false},
+    syncStatus: {notion_products: null, clickup: null, auto_products: null},
 
     async init() {
       try {
         const saved = localStorage.getItem('meta_ads_settings');
         if (saved) this.cfg = {...this.cfg, ...JSON.parse(saved)};
       } catch {}
-      // Also load from backend
       const serverCfg = await API.get('/api/settings');
       if (serverCfg && Object.keys(serverCfg).length > 0) {
         this.cfg = {...this.cfg, ...serverCfg};
+      }
+      this.$watch('tab', val => { if (val === 'integrations') this.loadProjectIntegrations(); });
+      if (this.tab === 'integrations') await this.loadProjectIntegrations();
+    },
+
+    async loadProjectIntegrations() {
+      this.integrationsLoaded = false;
+      const proj = await API.get('/api/projects/active');
+      this.activeProject = proj;
+      this.activePid = proj?.id || null;
+      if (this.activePid) {
+        const intg = await API.get(`/api/projects/${this.activePid}/integrations`);
+        this.projectIntegrations = intg || {};
+      } else {
+        this.projectIntegrations = {};
+      }
+      this.integrationsLoaded = true;
+    },
+
+    async pullNotionProducts() {
+      if (!this.activePid) return;
+      this.syncLoading.notion_products = true;
+      this.syncStatus.notion_products = null;
+      const r = await API.post(`/api/projects/${this.activePid}/pull-notion-products`, {});
+      this.syncLoading.notion_products = false;
+      if (r?.ok) {
+        this.syncStatus.notion_products = {ok: true, message: `${r.imported} produto(s) importado(s)`};
+        toast('success', `${r.imported} produto(s) importado(s) do Notion`);
+      } else {
+        this.syncStatus.notion_products = {ok: false, message: r?.error || 'Erro ao puxar'};
+        toast('error', r?.error || 'Erro ao puxar produtos do Notion');
+      }
+    },
+
+    async pullClickupTasks() {
+      if (!this.activePid) return;
+      this.syncLoading.clickup = true;
+      this.syncStatus.clickup = null;
+      const r = await API.post(`/api/projects/${this.activePid}/pull-clickup-tasks`, {});
+      this.syncLoading.clickup = false;
+      if (r?.ok) {
+        this.syncStatus.clickup = {ok: true, message: `${r.imported} tarefa(s) importada(s)`};
+        toast('success', `${r.imported} tarefa(s) importada(s) do ClickUp`);
+      } else {
+        this.syncStatus.clickup = {ok: false, message: r?.error || 'Erro ao puxar'};
+        toast('error', r?.error || 'Erro ao puxar tarefas do ClickUp');
+      }
+    },
+
+    async autoCreateProducts() {
+      if (!this.activePid) return;
+      this.syncLoading.auto_products = true;
+      this.syncStatus.auto_products = null;
+      const r = await API.post(`/api/projects/${this.activePid}/auto-products`, {});
+      this.syncLoading.auto_products = false;
+      if (r?.ok) {
+        const msg = r.created > 0 ? `${r.created} produto(s) criado(s)` : 'Nenhum produto novo detectado';
+        this.syncStatus.auto_products = {ok: true, message: msg};
+        toast(r.created > 0 ? 'success' : 'info', msg);
+        if (r.created > 0) window.dispatchEvent(new CustomEvent('page-refresh'));
+      } else {
+        this.syncStatus.auto_products = {ok: false, message: r?.message || 'Erro'};
+        toast('error', r?.message || 'Erro ao criar produtos');
       }
     },
 
@@ -2127,6 +2196,96 @@ settings(s) {
 
         <!-- INTEGRATIONS -->
         <div x-show="tab==='integrations'" x-transition class="space-y-4">
+
+          <!-- ── Per-project sync panel ─────────────────────────────────── -->
+          <div class="glass rounded-2xl p-5 space-y-4" style="border:1px solid rgba(59,130,246,0.25);">
+            <div class="flex items-center justify-between flex-wrap gap-2">
+              <h3 class="text-white font-semibold flex items-center gap-2">
+                <i class="fas fa-rotate text-blue-400"></i> Sincronizar Projeto Ativo
+              </h3>
+              <span class="badge" style="background:rgba(59,130,246,0.15);color:#93c5fd;border:1px solid rgba(59,130,246,0.25);"
+                    x-text="activeProject?.name || 'Nenhum projeto ativo'"></span>
+            </div>
+
+            <!-- loading state -->
+            <div x-show="!integrationsLoaded" class="flex items-center gap-2 text-slate-500 text-sm animate-pulse py-2">
+              <i class="fas fa-spinner animate-spin text-xs"></i> Carregando integrações...
+            </div>
+
+            <div x-show="integrationsLoaded && !activePid" class="text-slate-500 text-sm py-2">
+              Nenhum projeto ativo. Selecione um projeto no painel lateral.
+            </div>
+
+            <div x-show="integrationsLoaded && activePid" class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+
+              <!-- Notion Produtos -->
+              <div class="rounded-xl p-4 space-y-3" style="background:rgba(168,85,247,0.07);border:1px solid rgba(168,85,247,0.2);">
+                <div class="flex items-center gap-2">
+                  <i class="fas fa-book text-purple-400 text-sm"></i>
+                  <span class="text-sm font-medium text-white">Notion — Produtos</span>
+                  <span class="badge text-xs ml-auto"
+                        :style="projectIntegrations.notion_products_db_id ? 'background:rgba(34,197,94,0.12);color:#4ade80;border:1px solid rgba(34,197,94,0.25)' : 'background:rgba(100,116,139,0.12);color:#94a3b8;border:1px solid rgba(100,116,139,0.2)'"
+                        x-text="projectIntegrations.notion_products_db_id ? 'Conectado' : 'Não config.'"></span>
+                </div>
+                <p class="text-xs text-slate-500">Importa produtos do Notion para a lista de produtos da IA.</p>
+                <button @click="pullNotionProducts()"
+                        :disabled="!projectIntegrations.notion_products_db_id || syncLoading.notion_products"
+                        class="w-full py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40"
+                        style="background:rgba(168,85,247,0.15);color:#c084fc;border:1px solid rgba(168,85,247,0.3);">
+                  <i :class="syncLoading.notion_products ? 'fas fa-spinner animate-spin' : 'fas fa-cloud-arrow-down'" class="mr-1 text-xs"></i>
+                  <span x-text="syncLoading.notion_products ? 'Puxando...' : 'Puxar Produtos'"></span>
+                </button>
+                <p x-show="syncStatus.notion_products" class="text-xs text-center"
+                   :class="syncStatus.notion_products?.ok ? 'text-green-400' : 'text-red-400'"
+                   x-text="syncStatus.notion_products?.message"></p>
+              </div>
+
+              <!-- ClickUp Tasks -->
+              <div class="rounded-xl p-4 space-y-3" style="background:rgba(236,72,153,0.07);border:1px solid rgba(236,72,153,0.2);">
+                <div class="flex items-center gap-2">
+                  <i class="fas fa-check-circle text-pink-400 text-sm"></i>
+                  <span class="text-sm font-medium text-white">ClickUp — Tarefas</span>
+                  <span class="badge text-xs ml-auto"
+                        :style="projectIntegrations.clickup_list_id ? 'background:rgba(34,197,94,0.12);color:#4ade80;border:1px solid rgba(34,197,94,0.25)' : 'background:rgba(100,116,139,0.12);color:#94a3b8;border:1px solid rgba(100,116,139,0.2)'"
+                        x-text="projectIntegrations.clickup_list_id ? 'Conectado' : 'Não config.'"></span>
+                </div>
+                <p class="text-xs text-slate-500">Importa tarefas do ClickUp como ideias de campanhas.</p>
+                <button @click="pullClickupTasks()"
+                        :disabled="!projectIntegrations.clickup_list_id || syncLoading.clickup"
+                        class="w-full py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40"
+                        style="background:rgba(236,72,153,0.15);color:#f472b6;border:1px solid rgba(236,72,153,0.3);">
+                  <i :class="syncLoading.clickup ? 'fas fa-spinner animate-spin' : 'fas fa-cloud-arrow-down'" class="mr-1 text-xs"></i>
+                  <span x-text="syncLoading.clickup ? 'Puxando...' : 'Puxar Tarefas'"></span>
+                </button>
+                <p x-show="syncStatus.clickup" class="text-xs text-center"
+                   :class="syncStatus.clickup?.ok ? 'text-green-400' : 'text-red-400'"
+                   x-text="syncStatus.clickup?.message"></p>
+              </div>
+
+              <!-- Auto-create products from campaigns -->
+              <div class="rounded-xl p-4 space-y-3" style="background:rgba(59,130,246,0.07);border:1px solid rgba(59,130,246,0.2);">
+                <div class="flex items-center gap-2">
+                  <i class="fas fa-wand-magic-sparkles text-blue-400 text-sm"></i>
+                  <span class="text-sm font-medium text-white">Produtos por País</span>
+                  <span class="badge text-xs ml-auto" style="background:rgba(59,130,246,0.12);color:#60a5fa;border:1px solid rgba(59,130,246,0.25);">Auto</span>
+                </div>
+                <p class="text-xs text-slate-500">Detecta os países das campanhas e cria um produto por país automaticamente.</p>
+                <button @click="autoCreateProducts()"
+                        :disabled="syncLoading.auto_products"
+                        class="w-full py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40"
+                        style="background:rgba(59,130,246,0.15);color:#60a5fa;border:1px solid rgba(59,130,246,0.3);">
+                  <i :class="syncLoading.auto_products ? 'fas fa-spinner animate-spin' : 'fas fa-bolt'" class="mr-1 text-xs"></i>
+                  <span x-text="syncLoading.auto_products ? 'Criando...' : 'Criar Produtos'"></span>
+                </button>
+                <p x-show="syncStatus.auto_products" class="text-xs text-center"
+                   :class="syncStatus.auto_products?.ok ? 'text-green-400' : 'text-red-400'"
+                   x-text="syncStatus.auto_products?.message"></p>
+              </div>
+
+            </div>
+            <p class="text-xs text-slate-600">Configure o Notion e ClickUp de cada projeto no seletor de projetos (barra lateral → editar projeto).</p>
+          </div>
+
           <!-- AI Provider Config -->
           <div class="glass rounded-2xl p-5 space-y-4" style="border:1px solid rgba(168,85,247,0.2);">
             <h3 class="text-white font-semibold border-b pb-3 flex items-center gap-2" style="border-color:rgba(51,65,85,0.4);">

@@ -3686,6 +3686,180 @@ def sync_project_notion(pid: str, data: dict):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/projects/{pid}/pull-notion-products")
+def pull_notion_products(pid: str):
+    """Pull products from this project's Notion Produtos DB into ai_products (upsert by name)."""
+    conn = get_db()
+    row = conn.execute("SELECT * FROM projects WHERE id=?", (pid,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404)
+    r = dict(row)
+    token = r.get("notion_token", "") or ""
+    db_id = r.get("notion_products_db_id", "") or ""
+    if not token or not db_id:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Notion Produtos não configurado neste projeto")
+    try:
+        resp = http_req.post(
+            f"https://api.notion.com/v1/databases/{db_id}/query",
+            headers={"Authorization": f"Bearer {token}", "Notion-Version": "2022-06-28", "Content-Type": "application/json"},
+            json={"page_size": 100},
+            timeout=15,
+        )
+        data = resp.json()
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=str(e))
+    if "results" not in data:
+        conn.close()
+        return {"ok": False, "error": data.get("message", "Erro Notion"), "imported": 0}
+
+    def _txt(props, *keys):
+        for k in keys:
+            p = props.get(k)
+            if not p: continue
+            t = p.get("type","")
+            if t == "title":   return "".join(x["plain_text"] for x in p.get("title",[]))
+            if t == "rich_text": return "".join(x["plain_text"] for x in p.get("rich_text",[]))
+            if t == "select" and p.get("select"): return p["select"]["name"]
+        return ""
+
+    def _num(props, *keys):
+        for k in keys:
+            p = props.get(k)
+            if p and p.get("type") == "number" and p.get("number") is not None:
+                return float(p["number"])
+        return 0.0
+
+    imported = 0
+    for page in data["results"]:
+        props = page.get("properties", {})
+        name = _txt(props, "Produto", "Nome", "Name")
+        if not name: continue
+        cpa   = _num(props, "CPA Alvo", "CPA Target")
+        roas  = _num(props, "ROAS Alvo", "ROAS Target")
+        ticket = _num(props, "Ticket Médio", "Ticket")
+        notes_parts = [f"{k}: {_txt(props,k)}" for k in ["Status","Plataforma","CPA Máximo","Breakeven"] if _txt(props,k)]
+        notes = " | ".join(notes_parts)
+        existing = conn.execute("SELECT id FROM ai_products WHERE LOWER(name)=?", (name.lower(),)).fetchone()
+        if existing:
+            conn.execute("UPDATE ai_products SET cpa_target=?, roas_target=?, avg_ticket=?, notes=? WHERE id=?",
+                         (cpa, roas, ticket, notes, existing["id"]))
+        else:
+            conn.execute("INSERT INTO ai_products (id,name,cpa_target,roas_target,avg_ticket,notes) VALUES (?,?,?,?,?,?)",
+                         (str(uuid.uuid4()), name, cpa, roas, ticket, notes))
+        imported += 1
+    conn.commit()
+    conn.close()
+    return {"ok": True, "imported": imported}
+
+@app.post("/api/projects/{pid}/pull-clickup-tasks")
+def pull_clickup_tasks(pid: str):
+    """Pull tasks from this project's ClickUp list into ai_ideas (insert new only)."""
+    conn = get_db()
+    row = conn.execute("SELECT * FROM projects WHERE id=?", (pid,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404)
+    r = dict(row)
+    token   = r.get("clickup_token", "") or ""
+    list_id = r.get("clickup_list_id", "") or ""
+    if not token or not list_id:
+        conn.close()
+        raise HTTPException(status_code=400, detail="ClickUp não configurado neste projeto")
+    try:
+        resp = http_req.get(
+            f"https://api.clickup.com/api/v2/list/{list_id}/task",
+            headers={"Authorization": token},
+            params={"limit": 100},
+            timeout=15,
+        )
+        data = resp.json()
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=str(e))
+    if "tasks" not in data:
+        conn.close()
+        return {"ok": False, "error": data.get("err", "Erro ClickUp"), "imported": 0}
+
+    STATUS_MAP = {"done":"approved","complete":"approved","closed":"approved",
+                  "progress":"testing","doing":"testing","in progress":"testing",
+                  "reject":"rejected","cancel":"rejected","recusado":"rejected"}
+    imported = 0
+    for task in data["tasks"]:
+        title = task.get("name","")
+        if not title: continue
+        if conn.execute("SELECT id FROM ai_ideas WHERE title=?", (title,)).fetchone(): continue
+        status_raw = ((task.get("status") or {}).get("status") or "").lower()
+        status = next((v for k,v in STATUS_MAP.items() if k in status_raw), "new")
+        desc = (task.get("description") or "")[:500]
+        conn.execute("INSERT INTO ai_ideas (id,category,title,description,status,impact) VALUES (?,?,?,?,?,?)",
+                     (str(uuid.uuid4()), "clickup", title, desc, status, "medium"))
+        imported += 1
+    conn.commit()
+    conn.close()
+    return {"ok": True, "imported": imported}
+
+_COUNTRY_RE = ['BR','US','MX','AR','CL','CO','PE','EC','UY','PY','BO','VE','ES','PT','GB','CA','AU','DE','FR','IT']
+_STOP_WORDS = ['conversao','conversão','traffic','trafego','tráfego','retargeting','cold','warm','hot',
+               'video','imagem','carrossel','aquisicao','aquisição','lookalike','lal','cbo','abo',
+               'prospeccao','prospecção','remarketing','awareness','reach','alcance','vendas','sales',
+               'purchase','compra','scale','teste','test','new','old','copy','v2','v3','v4','fase']
+
+def _parse_product_country(campaign_name: str):
+    """Extract (product_name, country_code) from a campaign name."""
+    name_upper = campaign_name.upper()
+    country = None
+    for cc in _COUNTRY_RE:
+        if _re.search(r'(?:^|[\s_\-|/\.])' + cc + r'(?:$|[\s_\-|/\.])', name_upper):
+            country = cc
+            break
+    product = campaign_name
+    if country:
+        product = _re.sub(r'(?:^|[\s_\-|/\.])' + country + r'(?:$|[\s_\-|/\.])', ' ', product, flags=_re.IGNORECASE)
+    for sw in _STOP_WORDS:
+        product = _re.sub(r'(?:^|[\s_\-|/\.])' + _re.escape(sw) + r'(?:$|[\s_\-|/\.])', ' ', product, flags=_re.IGNORECASE)
+    product = _re.sub(r'\b(20\d\d|jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\b', '', product, flags=_re.IGNORECASE)
+    product = _re.sub(r'[\s_\-|/\.]+', ' ', product).strip()
+    return product or campaign_name.strip(), country
+
+@app.post("/api/projects/{pid}/auto-products")
+def auto_create_products(pid: str):
+    """Scan campaign names for this project and auto-create ai_products per country."""
+    conn = get_db()
+    accounts = conn.execute("SELECT * FROM ad_accounts WHERE project_id=?", (pid,)).fetchall()
+    if not accounts:
+        conn.close()
+        return {"ok": True, "created": 0, "message": "Nenhuma conta neste projeto"}
+    created = 0
+    seen: set = set()
+    for acc in accounts:
+        for c in fetch_meta_campaigns(acc["account_id"], acc["access_token"]):
+            cname = c.get("name","")
+            if not cname: continue
+            pname, country = _parse_product_country(cname)
+            if not pname: continue
+            key = (pname.lower(), country or "")
+            if key in seen: continue
+            seen.add(key)
+            if country:
+                exists = conn.execute(
+                    "SELECT id FROM ai_products WHERE LOWER(name)=? AND countries LIKE ?",
+                    (pname.lower(), f"%{country}%")
+                ).fetchone()
+            else:
+                exists = conn.execute("SELECT id FROM ai_products WHERE LOWER(name)=?", (pname.lower(),)).fetchone()
+            if not exists:
+                conn.execute(
+                    "INSERT INTO ai_products (id,name,countries,notes) VALUES (?,?,?,?)",
+                    (str(uuid.uuid4()), pname, country or "", f"Auto — campanha: {cname}")
+                )
+                created += 1
+    conn.commit()
+    conn.close()
+    return {"ok": True, "created": created}
+
 
 # ─── Web Intelligence ─────────────────────────────────────────────────────────
 
