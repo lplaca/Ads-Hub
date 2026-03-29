@@ -309,7 +309,7 @@ window.TPL_CONNECTIONS = function(c) {
 
   <!-- ── ADD CONNECTION MODAL ────────────────────────────────────────────── -->
   <div x-show="showModal" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
-    class="fixed inset-0 z-50 flex items-center justify-center p-4"
+    class="fixed inset-0 z-[200] flex items-center justify-center p-4"
     style="background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);display:none;">
     <div @click.stop x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100"
       class="w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden"
