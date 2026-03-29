@@ -2,7 +2,7 @@
 Meta Ads Control Center - Backend API
 FastAPI + SQLite - Serves frontend + API
 """
-import os, json, uuid, random, requests as http_req, threading, time, hashlib, secrets
+import os, json, uuid, random, requests as http_req, threading, time, hashlib, secrets, hmac, base64
 import smtplib, ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -30,7 +30,8 @@ _launch_threads: dict = {}
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "meta_ads.db")
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
-DATABASE_URL = os.getenv("DATABASE_URL", "")
+DATABASE_URL    = os.getenv("DATABASE_URL", "")
+SESSION_SECRET  = os.getenv("SESSION_SECRET", "")  # Set on Render for stateless tokens
 
 # ─── PostgreSQL compatibility layer ────────────────────────────────────────────
 if DATABASE_URL:
@@ -361,6 +362,11 @@ def init_db():
         "ALTER TABLE rules ADD COLUMN last_run TIMESTAMP",
         "ALTER TABLE business_managers ADD COLUMN project_id TEXT DEFAULT ''",
         "ALTER TABLE ad_accounts ADD COLUMN project_id TEXT DEFAULT ''",
+        "ALTER TABLE projects ADD COLUMN notion_token TEXT DEFAULT ''",
+        "ALTER TABLE projects ADD COLUMN notion_analyses_db_id TEXT DEFAULT ''",
+        "ALTER TABLE projects ADD COLUMN notion_products_db_id TEXT DEFAULT ''",
+        "ALTER TABLE projects ADD COLUMN clickup_token TEXT DEFAULT ''",
+        "ALTER TABLE projects ADD COLUMN clickup_list_id TEXT DEFAULT ''",
     ]
     for m in migrations:
         try:
@@ -3362,10 +3368,44 @@ def _verify_pw(pw: str, stored: str) -> bool:
     except Exception:
         return False
 
+def _create_stateless_token(uid: str, email: str, name: str) -> str:
+    """Create an HMAC-signed stateless session token (survives server restarts)."""
+    if not SESSION_SECRET:
+        return ""
+    exp = (datetime.now() + timedelta(days=30)).timestamp()
+    payload = json.dumps({"uid": uid, "email": email, "name": name, "exp": exp}, separators=(',', ':'))
+    b64 = base64.urlsafe_b64encode(payload.encode()).decode()
+    sig = hmac.new(SESSION_SECRET.encode(), b64.encode(), hashlib.sha256).hexdigest()
+    return f"sl.{b64}.{sig}"
+
+def _verify_stateless_token(token: str) -> Optional[dict]:
+    """Verify and decode a stateless token. Returns user dict or None."""
+    if not SESSION_SECRET or not token.startswith("sl."):
+        return None
+    try:
+        parts = token.split(".", 2)
+        if len(parts) != 3:
+            return None
+        _, b64, sig = parts
+        expected = hmac.new(SESSION_SECRET.encode(), b64.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            return None
+        payload = json.loads(base64.urlsafe_b64decode(b64 + "==").decode())
+        if payload.get("exp", 0) < datetime.now().timestamp():
+            return None
+        return {"user_id": payload["uid"], "email": payload["email"], "name": payload["name"]}
+    except Exception:
+        return None
+
 def _get_current_user(request: Request) -> Optional[dict]:
     token = request.headers.get("X-Auth-Token") or request.cookies.get("auth_token")
     if not token:
         return None
+    # Try stateless HMAC token first (works after server restart on Render)
+    user = _verify_stateless_token(token)
+    if user:
+        return user
+    # Fall back to DB-stored session
     conn = get_db()
     row = conn.execute(
         "SELECT us.user_id, u.email, u.name FROM user_sessions us "
@@ -3402,11 +3442,14 @@ def auth_setup(data: dict):
     conn.execute("INSERT INTO users (id, email, name, password_hash) VALUES (?,?,?,?)",
                  (uid, email, name, _hash_pw(pw)))
     conn.commit()
-    token = secrets.token_hex(32)
-    exp   = (datetime.now() + timedelta(days=30)).isoformat()
-    conn.execute("INSERT INTO user_sessions (token, user_id, expires_at) VALUES (?,?,?)",
-                 (token, uid, exp))
-    conn.commit()
+    if SESSION_SECRET:
+        token = _create_stateless_token(uid, email, name)
+    else:
+        token = secrets.token_hex(32)
+        exp   = (datetime.now() + timedelta(days=30)).isoformat()
+        conn.execute("INSERT INTO user_sessions (token, user_id, expires_at) VALUES (?,?,?)",
+                     (token, uid, exp))
+        conn.commit()
     conn.close()
     return {"ok": True, "token": token, "user": {"id": uid, "email": email, "name": name}}
 
@@ -3420,12 +3463,16 @@ def auth_login(data: dict):
     if not user or not _verify_pw(pw, user["password_hash"]):
         conn.close()
         raise HTTPException(status_code=401, detail="Email ou senha incorretos")
-    token = secrets.token_hex(32)
-    exp   = (datetime.now() + timedelta(days=30)).isoformat()
-    conn.execute("INSERT INTO user_sessions (token, user_id, expires_at) VALUES (?,?,?)",
-                 (token, user["id"], exp))
-    conn.commit()
-    conn.close()
+    if SESSION_SECRET:
+        token = _create_stateless_token(user["id"], user["email"], user["name"])
+        conn.close()
+    else:
+        token = secrets.token_hex(32)
+        exp   = (datetime.now() + timedelta(days=30)).isoformat()
+        conn.execute("INSERT INTO user_sessions (token, user_id, expires_at) VALUES (?,?,?)",
+                     (token, user["id"], exp))
+        conn.commit()
+        conn.close()
     return {"ok": True, "token": token, "user": {"id": user["id"], "email": user["email"], "name": user["name"]}}
 
 @app.post("/api/auth/logout")
@@ -3544,6 +3591,100 @@ def get_active_project():
     row = conn.execute("SELECT * FROM projects WHERE id=?", (active_id,)).fetchone()
     conn.close()
     return dict(row) if row else {"id": "", "name": "Todos os projetos", "color": "#64748b"}
+
+@app.get("/api/projects/{pid}/integrations")
+def get_project_integrations(pid: str):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM projects WHERE id=?", (pid,)).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+    r = dict(row)
+    return {
+        "notion_token":          r.get("notion_token", "") or "",
+        "notion_analyses_db_id": r.get("notion_analyses_db_id", "") or "",
+        "notion_products_db_id": r.get("notion_products_db_id", "") or "",
+        "clickup_token":         r.get("clickup_token", "") or "",
+        "clickup_list_id":       r.get("clickup_list_id", "") or "",
+    }
+
+@app.put("/api/projects/{pid}/integrations")
+def update_project_integrations(pid: str, data: dict):
+    conn = get_db()
+    row = conn.execute("SELECT id FROM projects WHERE id=?", (pid,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+    conn.execute(
+        "UPDATE projects SET notion_token=?, notion_analyses_db_id=?, notion_products_db_id=?, clickup_token=?, clickup_list_id=? WHERE id=?",
+        (
+            data.get("notion_token", ""),
+            data.get("notion_analyses_db_id", ""),
+            data.get("notion_products_db_id", ""),
+            data.get("clickup_token", ""),
+            data.get("clickup_list_id", ""),
+            pid,
+        )
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+@app.post("/api/projects/{pid}/sync-notion")
+def sync_project_notion(pid: str, data: dict):
+    """Push a daily analysis row to this project's Notion Análises Diárias database."""
+    conn = get_db()
+    row = conn.execute("SELECT * FROM projects WHERE id=?", (pid,)).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+    r = dict(row)
+    token = r.get("notion_token", "") or ""
+    db_id = r.get("notion_analyses_db_id", "") or ""
+    if not token or not db_id:
+        raise HTTPException(status_code=400, detail="Integração Notion não configurada para este projeto")
+
+    props = {}
+    if data.get("title"):
+        props["Título"] = {"title": [{"text": {"content": str(data["title"])}}]}
+    if data.get("date"):
+        props["Data"] = {"date": {"start": str(data["date"])}}
+    if data.get("periodo"):
+        props["Período"] = {"select": {"name": str(data["periodo"])}}
+    if data.get("gasto") is not None:
+        props["Gasto"] = {"number": float(data["gasto"])}
+    if data.get("vendas") is not None:
+        props["Vendas"] = {"number": int(data["vendas"])}
+    if data.get("cpa_real") is not None:
+        props["CPA Real"] = {"number": float(data["cpa_real"])}
+    if data.get("ctr") is not None:
+        props["CTR%"] = {"number": float(data["ctr"])}
+    if data.get("cliques") is not None:
+        props["Cliques"] = {"number": int(data["cliques"])}
+    if data.get("impressoes") is not None:
+        props["Impressões"] = {"number": int(data["impressoes"])}
+    if data.get("observacao"):
+        props["Observação"] = {"rich_text": [{"text": {"content": str(data["observacao"])}}]}
+    if data.get("acao_tomada"):
+        props["Ação Tomada"] = {"rich_text": [{"text": {"content": str(data["acao_tomada"])}}]}
+
+    try:
+        resp = http_req.post(
+            "https://api.notion.com/v1/pages",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Notion-Version": "2022-06-28",
+                "Content-Type": "application/json",
+            },
+            json={"parent": {"database_id": db_id}, "properties": props},
+            timeout=15,
+        )
+        result = resp.json()
+        if "id" in result:
+            return {"ok": True, "notion_page_id": result["id"]}
+        return {"ok": False, "error": result.get("message", "Erro ao criar página no Notion")}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ─── Web Intelligence ─────────────────────────────────────────────────────────

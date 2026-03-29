@@ -199,9 +199,12 @@ Alpine.data('ProjectSwitcher', () => ({
   active: null,
   open: false,
   showModal: false,
+  showIntegrations: false,
   editId: null,
   form: { name: '', color: '#3b82f6' },
+  integrations: { notion_token: '', notion_analyses_db_id: '', notion_products_db_id: '', clickup_token: '', clickup_list_id: '' },
   saving: false,
+  savingIntegrations: false,
 
   COLORS: ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#f97316'],
 
@@ -230,12 +233,17 @@ Alpine.data('ProjectSwitcher', () => ({
   openCreate() {
     this.editId = null;
     this.form = { name: '', color: '#3b82f6' };
+    this.integrations = { notion_token: '', notion_analyses_db_id: '', notion_products_db_id: '', clickup_token: '', clickup_list_id: '' };
+    this.showIntegrations = false;
     this.showModal = true;
   },
 
-  openEdit(p) {
+  async openEdit(p) {
     this.editId = p.id;
     this.form = { name: p.name, color: p.color };
+    this.showIntegrations = false;
+    const intg = await API.get(`/api/projects/${p.id}/integrations`);
+    this.integrations = intg || { notion_token: '', notion_analyses_db_id: '', notion_products_db_id: '', clickup_token: '', clickup_list_id: '' };
     this.showModal = true;
   },
 
@@ -243,10 +251,17 @@ Alpine.data('ProjectSwitcher', () => ({
     if (!this.form.name.trim()) return;
     this.saving = true;
     try {
-      if (this.editId) {
-        await API.put(`/api/projects/${this.editId}`, this.form);
+      let pid = this.editId;
+      if (pid) {
+        await API.put(`/api/projects/${pid}`, this.form);
       } else {
-        await API.post('/api/projects', this.form);
+        const res = await API.post('/api/projects', this.form);
+        pid = res?.id;
+      }
+      // Save integrations if any field filled
+      const hasIntg = Object.values(this.integrations).some(v => v && v.trim());
+      if (pid && hasIntg) {
+        await API.put(`/api/projects/${pid}/integrations`, this.integrations);
       }
       this.showModal = false;
       this.form = { name: '', color: '#3b82f6' };
@@ -254,7 +269,6 @@ Alpine.data('ProjectSwitcher', () => ({
       window.dispatchEvent(new CustomEvent('project-changed'));
       window.dispatchEvent(new CustomEvent('page-refresh'));
     } catch(e) {
-      // silent fail — modal still closes
       this.showModal = false;
     } finally {
       this.saving = false;
