@@ -446,25 +446,27 @@ Alpine.data('Dashboard', () => ({
             <span class="badge text-xs" style="background:rgba(59,130,246,0.12);color:#60a5fa;border:1px solid rgba(59,130,246,0.2);" x-text="clockCodes.length + ' países'"></span>
           </div>
           <!-- Add / manage button -->
-          <div class="relative">
-            <button @click="clockPickerOpen=!clockPickerOpen"
-              :class="clockPickerOpen ? 'bg-blue-600/30 text-blue-300 border-blue-500/40' : 'text-slate-400 border-slate-700/50 hover:text-blue-300 hover:border-blue-500/30'"
-              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all">
-              <i class="fas fa-plus text-xs"></i> Gerenciar países
-            </button>
-            <!-- Picker dropdown -->
-            <div x-show="clockPickerOpen" @click.outside="clockPickerOpen=false"
-                 x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-                 class="absolute right-0 top-full mt-1 z-50 rounded-xl shadow-2xl"
-                 style="display:none;width:320px;background:rgba(15,23,42,0.98);border:1px solid rgba(59,130,246,0.2);backdrop-filter:blur(20px);">
-              <div class="px-4 py-2.5 flex items-center justify-between" style="border-bottom:1px solid rgba(51,65,85,0.4);">
+          <button @click="clockPickerOpen=!clockPickerOpen"
+            :class="clockPickerOpen ? 'bg-blue-600/30 text-blue-300 border-blue-500/40' : 'text-slate-400 border-slate-700/50 hover:text-blue-300 hover:border-blue-500/30'"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all">
+            <i class="fas fa-plus text-xs"></i> Gerenciar países
+          </button>
+          <!-- Picker modal overlay -->
+          <div x-show="clockPickerOpen" @click="clockPickerOpen=false"
+               x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+               class="fixed inset-0 z-[200] flex items-center justify-center p-4"
+               style="display:none;background:rgba(0,0,0,0.65);backdrop-filter:blur(4px);">
+            <div @click.stop class="w-full max-w-sm rounded-2xl shadow-2xl"
+                 style="background:rgba(15,23,42,0.99);border:1px solid rgba(59,130,246,0.25);">
+              <div class="px-4 py-3 flex items-center justify-between" style="border-bottom:1px solid rgba(51,65,85,0.4);">
                 <p class="text-white font-semibold text-sm">Selecionar Países</p>
-                <div class="flex gap-2">
+                <div class="flex gap-3 items-center">
                   <button @click="clockCodes=['br','mx','us','co','ar']; localStorage.setItem('meta_clock_countries', JSON.stringify(clockCodes))" class="text-xs text-slate-500 hover:text-blue-400 transition-colors">Padrão</button>
                   <button @click="clockCodes=[]; localStorage.setItem('meta_clock_countries', JSON.stringify([]))" class="text-xs text-slate-500 hover:text-red-400 transition-colors">Limpar</button>
+                  <button @click="clockPickerOpen=false" class="text-slate-500 hover:text-white transition-colors"><i class="fas fa-times text-xs"></i></button>
                 </div>
               </div>
-              <div class="p-3 grid grid-cols-2 gap-1.5 overflow-y-auto" style="max-height:360px;">
+              <div class="p-3 grid grid-cols-2 gap-1.5 overflow-y-auto" style="max-height:400px;">
                 <template x-for="tz in allTimezones" :key="tz.code">
                   <button @click="toggleClockCountry(tz.code)"
                     :class="clockCodes.includes(tz.code) ? 'border-blue-500/50 bg-blue-500/10 text-blue-300' : 'border-slate-700/40 text-slate-500 hover:border-slate-600 hover:text-slate-300'"
@@ -477,7 +479,7 @@ Alpine.data('Dashboard', () => ({
                   </button>
                 </template>
               </div>
-              <div class="px-4 py-2.5" style="border-top:1px solid rgba(51,65,85,0.4);">
+              <div class="px-4 py-3" style="border-top:1px solid rgba(51,65,85,0.4);">
                 <button @click="clockPickerOpen=false" class="btn btn-primary btn-sm w-full">Fechar</button>
               </div>
             </div>

@@ -530,7 +530,6 @@ Alpine.data('AccountDetailPage', function() {
       </div>
       <div class="flex items-center gap-2 flex-wrap">
         <!-- Metrics picker button -->
-        <div class="relative">
           <button @click="demoPickerOpen=!demoPickerOpen"
             :class="demoPickerOpen ? 'bg-violet-600/30 text-violet-300 border-violet-500/40' : 'text-slate-400 border-slate-700/50 hover:text-violet-300 hover:border-violet-500/30'"
             class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-all flex items-center gap-1.5">
@@ -539,16 +538,19 @@ Alpine.data('AccountDetailPage', function() {
             <span class="ml-0.5 px-1.5 py-0.5 rounded-md text-xs font-bold" style="background:rgba(139,92,246,0.25);color:#c4b5fd;" x-text="demoCols.length"></span>
           </button>
 
-          <!-- Picker dropdown panel -->
-          <div x-show="demoPickerOpen" @click.outside="demoPickerOpen=false"
-               x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-               class="absolute right-0 top-full mt-1 z-50 rounded-xl shadow-2xl overflow-hidden"
-               style="display:none;width:360px;background:rgba(15,23,42,0.98);border:1px solid rgba(139,92,246,0.25);backdrop-filter:blur(20px);">
+          <!-- Picker modal overlay -->
+          <div x-show="demoPickerOpen" @click="demoPickerOpen=false"
+               x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+               class="fixed inset-0 z-[200] flex items-center justify-center p-4"
+               style="display:none;background:rgba(0,0,0,0.65);backdrop-filter:blur(4px);">
+          <div @click.stop class="w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden"
+               style="background:rgba(15,23,42,0.99);border:1px solid rgba(139,92,246,0.3);">
             <div class="px-4 py-3 flex items-center justify-between" style="border-bottom:1px solid rgba(51,65,85,0.4);">
               <p class="text-white font-semibold text-sm">Selecionar Métricas</p>
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-3">
                 <button @click="demoCols=['impressions','clicks','ctr','conversions','cpa','roas','revenue']" class="text-xs text-slate-500 hover:text-violet-400 transition-colors">Padrão</button>
                 <button @click="demoCols=[]" class="text-xs text-slate-500 hover:text-red-400 transition-colors">Limpar</button>
+                <button @click="demoPickerOpen=false" class="text-slate-500 hover:text-white transition-colors"><i class="fas fa-times text-xs"></i></button>
               </div>
             </div>
             <div class="p-3 space-y-3 overflow-y-auto" style="max-height:420px;">
@@ -634,7 +636,7 @@ Alpine.data('AccountDetailPage', function() {
               <button @click="demoPickerOpen=false" class="btn btn-primary btn-xs">Aplicar</button>
             </div>
           </div>
-        </div>
+          </div>
 
         <!-- Tab switcher -->
         <div class="flex items-center gap-1 p-1 rounded-lg" style="background:rgba(15,23,42,0.6);">

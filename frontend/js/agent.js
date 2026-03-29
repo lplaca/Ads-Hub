@@ -238,22 +238,34 @@ Alpine.data('CampaignsPage', () => ({
         <option value="purchase_per_ic">Taxa Compra/IC</option>
       </select>
       <!-- Column picker toggle -->
-      <div class="relative">
         <button @click="showColMenu=!showColMenu" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-slate-400 hover:text-white border border-slate-700/50 bg-slate-800/60 transition-all">
           <i class="fas fa-table-columns"></i> Colunas
         </button>
-        <div x-show="showColMenu" @click.outside="showColMenu=false"
-          class="absolute right-0 top-full mt-1 w-56 rounded-xl shadow-2xl z-50 p-2 overflow-y-auto"
-          style="background:#1e293b;border:1px solid rgba(51,65,85,0.7);max-height:280px;display:none;">
-          ${allCols.map(k=>`
-          <label class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-700/40 cursor-pointer text-xs text-slate-300">
-            <input type="checkbox" :checked="visibleCols.includes('${k}')"
-              @change="visibleCols.includes('${k}') ? visibleCols=visibleCols.filter(c=>c!=='${k}') : visibleCols.push('${k}')"
-              class="accent-blue-500 w-3.5 h-3.5">
-            ${this.COL_LABELS[k]}
-          </label>`).join('')}
+        <!-- Column picker modal overlay -->
+        <div x-show="showColMenu" @click="showColMenu=false"
+          x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+          class="fixed inset-0 z-[200] flex items-center justify-center p-4"
+          style="display:none;background:rgba(0,0,0,0.65);backdrop-filter:blur(4px);">
+          <div @click.stop class="w-full max-w-xs rounded-2xl shadow-2xl overflow-hidden"
+               style="background:#1e293b;border:1px solid rgba(51,65,85,0.7);">
+            <div class="px-4 py-3 flex items-center justify-between" style="border-bottom:1px solid rgba(51,65,85,0.4);">
+              <p class="text-white font-semibold text-sm">Colunas visíveis</p>
+              <button @click="showColMenu=false" class="text-slate-500 hover:text-white transition-colors"><i class="fas fa-times text-xs"></i></button>
+            </div>
+            <div class="p-2 overflow-y-auto" style="max-height:360px;">
+              ${allCols.map(k=>`
+              <label class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-700/40 cursor-pointer text-xs text-slate-300">
+                <input type="checkbox" :checked="visibleCols.includes('${k}')"
+                  @change="visibleCols.includes('${k}') ? visibleCols=visibleCols.filter(c=>c!=='${k}') : visibleCols.push('${k}')"
+                  class="accent-blue-500 w-3.5 h-3.5">
+                ${this.COL_LABELS[k]}
+              </label>`).join('')}
+            </div>
+            <div class="px-4 py-3" style="border-top:1px solid rgba(51,65,85,0.4);">
+              <button @click="showColMenu=false" class="btn btn-primary btn-sm w-full">Aplicar</button>
+            </div>
+          </div>
         </div>
-      </div>
     </div>
   </div>
 
