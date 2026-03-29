@@ -240,6 +240,19 @@ def init_db():
             key TEXT PRIMARY KEY,
             value TEXT
         );
+    """)
+    # ── Migrations: add columns that may not exist in older DB files ──────────
+    _migrations = [
+        ("ai_products", "country",       "TEXT DEFAULT ''"),
+        ("ai_products", "shopify_code",  "TEXT DEFAULT ''"),
+        ("ai_products", "campaign_type", "TEXT DEFAULT ''"),
+    ]
+    for table, col, definition in _migrations:
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {definition}")
+        except Exception:
+            pass  # Column already exists
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS sheets_config (
             id TEXT PRIMARY KEY,
             spreadsheet_id TEXT NOT NULL,
@@ -1667,6 +1680,82 @@ def account_overview(acc_id: str, period: str = "last_7d", date_from: str = "", 
     }
 
 
+def _fetch_demographic_insights(account_id: str, token: str, period: str, date_from: str = "", date_to: str = "") -> list:
+    """Fetch age+gender demographic breakdown from Meta API. Returns list of {age, gender, ...metrics}."""
+    params = _insights_params(period, date_from, date_to)
+    params["breakdowns"] = "age,gender"
+    data = meta_get(f"{account_id}/insights", token, params)
+    result = []
+    for row in data.get("data", []):
+        m = _parse_campaign_insights(row)
+        result.append({
+            "age": row.get("age", "unknown"),
+            "gender": row.get("gender", "unknown"),
+            **m,
+        })
+    return result
+
+
+def _recalc_derived(m: dict) -> None:
+    """Recalculate derived metrics after summing raw values."""
+    m["roas"]     = round(m["revenue"] / m["spend"], 2)       if m["spend"] > 0      else 0
+    m["cpa"]      = round(m["spend"]   / m["conversions"], 2) if m["conversions"] > 0 else 0
+    m["ctr"]      = round(m["clicks"]  / m["impressions"] * 100, 2) if m["impressions"] > 0 else 0
+    m["cpc_link"] = round(m["spend"]   / m["link_clicks"], 2) if m["link_clicks"] > 0 else 0
+
+
+@app.get("/api/accounts/{acc_id}/demographics")
+def account_demographics(acc_id: str, period: str = "last_7d", date_from: str = "", date_to: str = ""):
+    """Return demographic breakdown (age + gender) for an ad account."""
+    conn = get_db()
+    acc_row = conn.execute("SELECT * FROM ad_accounts WHERE id=?", (acc_id,)).fetchone()
+    conn.close()
+    if not acc_row:
+        raise HTTPException(status_code=404, detail="Conta não encontrada")
+    acc = dict(acc_row)
+    token = acc.get("access_token", "")
+    acct_id = acc["account_id"]
+
+    rows = _fetch_demographic_insights(acct_id, token, period, date_from, date_to)
+
+    # ── Aggregate by gender ───────────────────────────────────────────────────
+    gender_map: dict = {}
+    for r in rows:
+        g = r["gender"]
+        if g not in gender_map:
+            gender_map[g] = dict(_EMPTY_METRICS)
+        for k in _EMPTY_METRICS:
+            gender_map[g][k] += r.get(k, 0)
+    for m in gender_map.values():
+        _recalc_derived(m)
+
+    _GENDER_LABELS = {"male": "Homem", "female": "Mulher", "unknown": "Indefinido"}
+    gender_rows = sorted(
+        [{"gender": g, "gender_label": _GENDER_LABELS.get(g, g.title()), **m}
+         for g, m in gender_map.items()],
+        key=lambda x: x["spend"], reverse=True,
+    )
+
+    # ── Aggregate by age ──────────────────────────────────────────────────────
+    age_map: dict = {}
+    for r in rows:
+        a = r["age"]
+        if a not in age_map:
+            age_map[a] = dict(_EMPTY_METRICS)
+        for k in _EMPTY_METRICS:
+            age_map[a][k] += r.get(k, 0)
+    for m in age_map.values():
+        _recalc_derived(m)
+
+    _AGE_ORDER = ["13-17", "18-24", "25-34", "35-44", "45-54", "55-64", "65+"]
+    age_rows = sorted(
+        [{"age": a, **m} for a, m in age_map.items()],
+        key=lambda x: _AGE_ORDER.index(x["age"]) if x["age"] in _AGE_ORDER else 99,
+    )
+
+    return {"by_gender": gender_rows, "by_age": age_rows}
+
+
 @app.get("/api/accounts/{acc_id}/campaigns/{camp_id}/adsets")
 def campaign_adsets(acc_id: str, camp_id: str, period: str = "last_7d", date_from: str = "", date_to: str = ""):
     """Return all ad sets for a campaign with metrics."""
@@ -2454,14 +2543,25 @@ def save_agent_config(data: dict):
 def list_ai_products():
     return get_db_products()
 
+@app.get("/api/ai-products/by-country")
+def list_ai_products_by_country():
+    """Return products grouped by country code."""
+    products = get_db_products()
+    groups: dict = {}
+    for p in products:
+        c = (p.get("country") or "").strip().lower() or "other"
+        groups.setdefault(c, []).append(p)
+    return [{"country": c, "products": prods} for c, prods in sorted(groups.items())]
+
 @app.post("/api/ai-products")
 def create_ai_product(data: dict):
     conn = get_db()
     pid = str(uuid.uuid4())
     conn.execute(
-        "INSERT INTO ai_products (id, name, cpa_target, roas_target, avg_ticket, countries, peak_months, creative_types, notes) VALUES (?,?,?,?,?,?,?,?,?)",
-        (pid, data["name"], data.get("cpa_target", 0), data.get("roas_target", 0),
-         data.get("avg_ticket", 0), data.get("countries", ""), data.get("peak_months", ""),
+        "INSERT INTO ai_products (id, name, country, shopify_code, campaign_type, cpa_target, roas_target, avg_ticket, peak_months, creative_types, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (pid, data["name"], data.get("country", ""), data.get("shopify_code", ""),
+         data.get("campaign_type", ""), data.get("cpa_target", 0), data.get("roas_target", 0),
+         data.get("avg_ticket", 0), data.get("peak_months", ""),
          data.get("creative_types", ""), data.get("notes", ""))
     )
     conn.commit()
@@ -2472,9 +2572,10 @@ def create_ai_product(data: dict):
 def update_ai_product(pid: str, data: dict):
     conn = get_db()
     conn.execute(
-        "UPDATE ai_products SET name=?, cpa_target=?, roas_target=?, avg_ticket=?, countries=?, peak_months=?, creative_types=?, notes=? WHERE id=?",
-        (data.get("name"), data.get("cpa_target", 0), data.get("roas_target", 0),
-         data.get("avg_ticket", 0), data.get("countries", ""), data.get("peak_months", ""),
+        "UPDATE ai_products SET name=?, country=?, shopify_code=?, campaign_type=?, cpa_target=?, roas_target=?, avg_ticket=?, peak_months=?, creative_types=?, notes=? WHERE id=?",
+        (data.get("name"), data.get("country", ""), data.get("shopify_code", ""),
+         data.get("campaign_type", ""), data.get("cpa_target", 0), data.get("roas_target", 0),
+         data.get("avg_ticket", 0), data.get("peak_months", ""),
          data.get("creative_types", ""), data.get("notes", ""), pid)
     )
     conn.commit()

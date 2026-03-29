@@ -668,186 +668,531 @@ Alpine.data('AgentPage', () => ({
 // ══════════════════════════════════════════════════════════════════════════════
 //  KNOWLEDGE PAGE — Base de conhecimento do gestor
 // ══════════════════════════════════════════════════════════════════════════════
-Alpine.data('KnowledgePage', () => ({
-  activeTab: 'products',
-  products: [],
-  knowledge: [],
-  showProductModal: false,
-  showKnowledgeModal: false,
-  editProductId: null,
-  editKnowledgeId: null,
-  productForm: { name:'', cpa_target:0, roas_target:0, avg_ticket:0, countries:'', peak_months:'', creative_types:'', notes:'' },
-  knowledgeForm: { category:'market', title:'', content:'' },
-  saving: false,
+Alpine.data('KnowledgePage', () => {
 
-  async init() {
-    await this.load();
-    window.addEventListener('page-refresh', () => this.load());
-  },
+  // ── Country metadata ──────────────────────────────────────────────────────
+  const COUNTRY_INFO = {
+    mx:{flag:'🇲🇽',name:'México'},
+    br:{flag:'🇧🇷',name:'Brasil'},
+    us:{flag:'🇺🇸',name:'Estados Unidos'},
+    ar:{flag:'🇦🇷',name:'Argentina'},
+    co:{flag:'🇨🇴',name:'Colômbia'},
+    cl:{flag:'🇨🇱',name:'Chile'},
+    pe:{flag:'🇵🇪',name:'Peru'},
+    ec:{flag:'🇪🇨',name:'Equador'},
+    uy:{flag:'🇺🇾',name:'Uruguai'},
+    py:{flag:'🇵🇾',name:'Paraguai'},
+    bo:{flag:'🇧🇴',name:'Bolívia'},
+    ve:{flag:'🇻🇪',name:'Venezuela'},
+    ca:{flag:'🇨🇦',name:'Canadá'},
+    es:{flag:'🇪🇸',name:'Espanha'},
+    pt:{flag:'🇵🇹',name:'Portugal'},
+    gb:{flag:'🇬🇧',name:'Reino Unido'},
+    de:{flag:'🇩🇪',name:'Alemanha'},
+    fr:{flag:'🇫🇷',name:'França'},
+    it:{flag:'🇮🇹',name:'Itália'},
+    au:{flag:'🇦🇺',name:'Austrália'},
+    other:{flag:'🌍',name:'Outros'},
+  };
 
-  async load() {
-    const [products, knowledge] = await Promise.all([
-      API.get('/api/ai-products'),
-      API.get('/api/knowledge-base'),
-    ]);
-    if (products) this.products = products;
-    if (knowledge) this.knowledge = knowledge;
-  },
+  const EMPTY_PRODUCT = { name:'', country:'', shopify_code:'', campaign_type:'', cpa_target:0, roas_target:0, avg_ticket:0, peak_months:'', creative_types:'', notes:'' };
 
-  openProductModal(p) {
-    if (p) { this.productForm = {...p}; this.editProductId = p.id; }
-    else { this.productForm = { name:'', cpa_target:0, roas_target:0, avg_ticket:0, countries:'', peak_months:'', creative_types:'', notes:'' }; this.editProductId = null; }
-    this.showProductModal = true;
-  },
+  return {
+    activeTab: 'products',
+    products: [],
+    knowledge: [],
+    campaigns: [],
+    selectedCountry: null,
+    productSearch: '',
+    expandedCamps: {},
+    showProductModal: false,
+    showKnowledgeModal: false,
+    editProductId: null,
+    editKnowledgeId: null,
+    productForm: {...EMPTY_PRODUCT},
+    knowledgeForm: { category:'market', title:'', content:'' },
+    saving: false,
 
-  async saveProduct() {
-    if (!this.productForm.name) { toast('warning','Nome do produto é obrigatório'); return; }
-    this.saving = true;
-    let r;
-    if (this.editProductId) r = await API.put('/api/ai-products/'+this.editProductId, this.productForm);
-    else r = await API.post('/api/ai-products', this.productForm);
-    if (r?.status === 'success') {
-      toast('success', this.editProductId ? 'Produto atualizado!' : 'Produto adicionado!');
+    async init() {
       await this.load();
-      this.showProductModal = false;
-    }
-    this.saving = false;
-  },
+      window.addEventListener('page-refresh', () => this.load());
+    },
 
-  async deleteProduct(id) {
-    if (!confirm('Remover este produto?')) return;
-    const r = await API.del('/api/ai-products/'+id);
-    if (r?.status === 'success') { toast('success','Produto removido!'); await this.load(); }
-  },
+    async load() {
+      const [products, knowledge, camps] = await Promise.all([
+        API.get('/api/ai-products'),
+        API.get('/api/knowledge-base'),
+        API.get('/api/campaigns?period=last_30d'),
+      ]);
+      if (products) this.products = products;
+      if (knowledge) this.knowledge = knowledge;
+      if (camps) this.campaigns = camps;
+    },
 
-  openKnowledgeModal(k) {
-    if (k) { this.knowledgeForm = {...k}; this.editKnowledgeId = k.id; }
-    else { this.knowledgeForm = { category:'market', title:'', content:'' }; this.editKnowledgeId = null; }
-    this.showKnowledgeModal = true;
-  },
+    // ── Country helpers ─────────────────────────────────────────────────────
+    countryInfo(code) {
+      return COUNTRY_INFO[(code||'').toLowerCase()] || COUNTRY_INFO.other;
+    },
 
-  async saveKnowledge() {
-    if (!this.knowledgeForm.title || !this.knowledgeForm.content) { toast('warning','Preencha título e conteúdo'); return; }
-    this.saving = true;
-    let r;
-    if (this.editKnowledgeId) r = await API.put('/api/knowledge-base/'+this.editKnowledgeId, this.knowledgeForm);
-    else r = await API.post('/api/knowledge-base', this.knowledgeForm);
-    if (r?.status === 'success') {
-      toast('success', 'Conhecimento salvo!');
-      await this.load();
-      this.showKnowledgeModal = false;
-    }
-    this.saving = false;
-  },
+    get byCountry() {
+      const map = {};
+      this.products.forEach(p => {
+        const c = (p.country || '').trim().toLowerCase() || 'other';
+        if (!map[c]) map[c] = { code: c, ...this.countryInfo(c), products: [], totalCpaTarget: 0, totalRoasTarget: 0 };
+        map[c].products.push(p);
+        map[c].totalCpaTarget += Number(p.cpa_target) || 0;
+        map[c].totalRoasTarget += Number(p.roas_target) || 0;
+      });
+      return Object.values(map).sort((a,b) => b.products.length - a.products.length);
+    },
 
-  async deleteKnowledge(id) {
-    if (!confirm('Remover este conhecimento?')) return;
-    const r = await API.del('/api/knowledge-base/'+id);
-    if (r?.status === 'success') { toast('success','Removido!'); await this.load(); }
-  },
+    get currentCountryInfo() {
+      if (!this.selectedCountry) return null;
+      return this.countryInfo(this.selectedCountry);
+    },
 
-  catLabel(c) {
-    return {market:'Mercado',preference:'Preferências',strategy:'Estratégia',audience:'Público',creative:'Criativos'}[c]||c;
-  },
+    get filteredProducts() {
+      const prods = this.selectedCountry
+        ? this.products.filter(p => (p.country||'').toLowerCase() === this.selectedCountry)
+        : this.products;
+      if (!this.productSearch) return prods;
+      const q = this.productSearch.toLowerCase();
+      return prods.filter(p =>
+        (p.name||'').toLowerCase().includes(q) ||
+        (p.shopify_code||'').toLowerCase().includes(q)
+      );
+    },
 
-  catColor(c) {
-    return {market:'#3b82f6',preference:'#a855f7',strategy:'#10b981',audience:'#f59e0b',creative:'#f97316'}[c]||'#64748b';
-  },
+    // ── Campaign name parser ────────────────────────────────────────────────
+    // Format: [country] [type] [product name] [start date] - shopify_code
+    parseCampaignName(name) {
+      const brackets = (name.match(/\[([^\]]+)\]/g) || []).map(m => m.slice(1,-1).trim());
+      const dashIdx = name.lastIndexOf(' - ');
+      const shopify_code = dashIdx >= 0 ? name.slice(dashIdx + 3).trim() : '';
+      return {
+        country:      (brackets[0] || '').toLowerCase(),
+        type:         (brackets[1] || '').toLowerCase(),
+        product_name: brackets[2] || '',
+        start_date:   brackets[3] || '',
+        shopify_code,
+      };
+    },
 
-  get knowledgeByCategory() {
-    const groups = {};
-    this.knowledge.forEach(k => { groups[k.category] = groups[k.category] || []; groups[k.category].push(k); });
-    return groups;
-  },
+    matchedCampaigns(product) {
+      if (!this.campaigns.length) return [];
+      const pCountry = (product.country || '').toLowerCase();
+      const pCode    = (product.shopify_code || '').toLowerCase();
+      const pName    = (product.name || '').toLowerCase();
+      return this.campaigns.filter(c => {
+        const parsed = this.parseCampaignName(c.name || '');
+        const countryMatch = !pCountry || parsed.country === pCountry;
+        const codeMatch    = pCode && parsed.shopify_code.toLowerCase() === pCode;
+        const nameMatch    = pName.length >= 3 && parsed.product_name.toLowerCase().includes(pName.substring(0, Math.min(pName.length, 8)));
+        return countryMatch && (codeMatch || nameMatch);
+      });
+    },
 
-  renderPage() {
-    return `
+    toggleCamps(prodId) {
+      this.expandedCamps = { ...this.expandedCamps, [prodId]: !this.expandedCamps[prodId] };
+    },
+
+    fmtMoney(n) {
+      if (!n) return '$0';
+      return '$' + Number(n).toLocaleString('pt-BR', {minimumFractionDigits:2,maximumFractionDigits:2});
+    },
+
+    roasColor(r) {
+      if (r >= 4) return '#10b981';
+      if (r >= 2) return '#f59e0b';
+      if (r > 0)  return '#ef4444';
+      return '#64748b';
+    },
+
+    campStatusColor(s) {
+      return s==='active'?'#10b981':s==='paused'?'#64748b':'#ef4444';
+    },
+
+    // ── Product CRUD ────────────────────────────────────────────────────────
+    openProductModal(p) {
+      if (p) { this.productForm = {...EMPTY_PRODUCT, ...p}; this.editProductId = p.id; }
+      else {
+        this.productForm = {...EMPTY_PRODUCT, country: this.selectedCountry || ''};
+        this.editProductId = null;
+      }
+      this.showProductModal = true;
+    },
+
+    async saveProduct() {
+      if (!this.productForm.name)    { toast('warning','Nome do produto é obrigatório'); return; }
+      if (!this.productForm.country) { toast('warning','País é obrigatório'); return; }
+      this.saving = true;
+      let r;
+      if (this.editProductId) r = await API.put('/api/ai-products/'+this.editProductId, this.productForm);
+      else r = await API.post('/api/ai-products', this.productForm);
+      if (r?.status === 'success') {
+        toast('success', this.editProductId ? 'Produto atualizado!' : 'Produto adicionado!');
+        await this.load();
+        this.showProductModal = false;
+      }
+      this.saving = false;
+    },
+
+    async deleteProduct(id) {
+      if (!confirm('Remover este produto?')) return;
+      const r = await API.del('/api/ai-products/'+id);
+      if (r?.status === 'success') { toast('success','Produto removido!'); await this.load(); }
+    },
+
+    // ── Knowledge CRUD ──────────────────────────────────────────────────────
+    openKnowledgeModal(k) {
+      if (k) { this.knowledgeForm = {...k}; this.editKnowledgeId = k.id; }
+      else { this.knowledgeForm = { category:'market', title:'', content:'' }; this.editKnowledgeId = null; }
+      this.showKnowledgeModal = true;
+    },
+
+    async saveKnowledge() {
+      if (!this.knowledgeForm.title || !this.knowledgeForm.content) { toast('warning','Preencha título e conteúdo'); return; }
+      this.saving = true;
+      let r;
+      if (this.editKnowledgeId) r = await API.put('/api/knowledge-base/'+this.editKnowledgeId, this.knowledgeForm);
+      else r = await API.post('/api/knowledge-base', this.knowledgeForm);
+      if (r?.status === 'success') {
+        toast('success','Conhecimento salvo!');
+        await this.load();
+        this.showKnowledgeModal = false;
+      }
+      this.saving = false;
+    },
+
+    async deleteKnowledge(id) {
+      if (!confirm('Remover este conhecimento?')) return;
+      const r = await API.del('/api/knowledge-base/'+id);
+      if (r?.status === 'success') { toast('success','Removido!'); await this.load(); }
+    },
+
+    catLabel(c) {
+      return {market:'Mercado',preference:'Preferências',strategy:'Estratégia',audience:'Público',creative:'Criativos'}[c]||c;
+    },
+    catColor(c) {
+      return {market:'#3b82f6',preference:'#a855f7',strategy:'#10b981',audience:'#f59e0b',creative:'#f97316'}[c]||'#64748b';
+    },
+    get knowledgeByCategory() {
+      const groups = {};
+      this.knowledge.forEach(k => { groups[k.category] = groups[k.category] || []; groups[k.category].push(k); });
+      return groups;
+    },
+
+    renderPage() {
+      return `
 <div class="fade-in space-y-5">
 
-  <!-- Tabs -->
+  <!-- ── Tabs ────────────────────────────────────────────────────────────── -->
   <div class="glass rounded-2xl overflow-hidden">
     <div class="flex flex-wrap border-b border-slate-700/40">
       ${[
-        {id:'products',label:'Produtos & Metas',icon:'fa-box'},
+        {id:'products', label:'Produtos por País', icon:'fa-box'},
         {id:'knowledge',label:'Base de Conhecimento',icon:'fa-brain'},
-        {id:'preview',label:'Preview do Prompt',icon:'fa-eye'},
+        {id:'preview',  label:'Preview do Prompt',   icon:'fa-eye'},
       ].map(t=>`
-      <button @click="activeTab='${t.id}'" class="flex items-center gap-2 px-5 py-3.5 text-sm font-medium transition-colors border-b-2 -mb-px"
+      <button @click="activeTab='${t.id}'; selectedCountry=null" class="flex items-center gap-2 px-5 py-3.5 text-sm font-medium transition-colors border-b-2 -mb-px"
               :class="activeTab==='${t.id}' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-300'">
         <i class="fas ${t.icon} text-xs"></i>${t.label}
       </button>`).join('')}
     </div>
 
-    <!-- Products Tab -->
-    <div x-show="activeTab==='products'" class="p-5">
-      <div class="flex items-center justify-between mb-4">
-        <div>
-          <p class="text-white font-semibold">Produtos Cadastrados</p>
-          <p class="text-slate-400 text-xs mt-0.5">Define metas de CPA e ROAS que o gestor usará nas análises</p>
+    <!-- ══ PRODUCTS TAB ══════════════════════════════════════════════════ -->
+    <div x-show="activeTab==='products'">
+
+      <!-- Header bar -->
+      <div class="px-5 py-4 flex items-center justify-between flex-wrap gap-3" style="border-bottom:1px solid rgba(51,65,85,0.3);">
+        <div class="flex items-center gap-3 min-w-0">
+          <!-- Breadcrumb -->
+          <template x-if="!selectedCountry">
+            <div class="flex items-center gap-2">
+              <i class="fas fa-earth-americas text-blue-400"></i>
+              <span class="text-white font-semibold">Todos os Países</span>
+              <span class="badge badge-blue text-xs" x-text="byCountry.length + ' países'"></span>
+              <span class="badge text-xs" style="background:rgba(51,65,85,0.5);color:#94a3b8;" x-text="products.length + ' produtos'"></span>
+            </div>
+          </template>
+          <template x-if="selectedCountry">
+            <div class="flex items-center gap-2">
+              <button @click="selectedCountry=null; productSearch=''" class="flex items-center gap-1.5 text-slate-400 hover:text-white transition-colors text-sm">
+                <i class="fas fa-chevron-left text-xs"></i> Países
+              </button>
+              <span class="text-slate-600">/</span>
+              <span class="text-2xl" x-text="currentCountryInfo?.flag"></span>
+              <span class="text-white font-semibold" x-text="currentCountryInfo?.name"></span>
+              <span class="badge badge-blue text-xs" x-text="filteredProducts.length + ' produtos'"></span>
+            </div>
+          </template>
         </div>
-        <button @click="openProductModal(null)"
-                class="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-white transition-all"
-                style="background:linear-gradient(135deg,#3b82f6,#2563eb);">
-          <i class="fas fa-plus"></i> Novo Produto
-        </button>
+        <div class="flex items-center gap-2">
+          <!-- Search (only in country view) -->
+          <template x-if="selectedCountry">
+            <div class="relative">
+              <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+              <input x-model="productSearch" type="text" placeholder="Buscar produto ou código..." class="input-field pl-8 py-1.5 text-sm" style="width:220px;">
+            </div>
+          </template>
+          <button @click="openProductModal(null)"
+                  class="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-white transition-all flex-shrink-0"
+                  style="background:linear-gradient(135deg,#3b82f6,#2563eb);">
+            <i class="fas fa-plus text-xs"></i> Novo Produto
+          </button>
+        </div>
       </div>
-      <template x-if="products.length===0">
-        <div class="text-center py-12 border border-dashed border-slate-700/50 rounded-2xl">
-          <i class="fas fa-box text-slate-600 text-4xl mb-3"></i>
-          <p class="text-slate-400 mb-2">Nenhum produto cadastrado</p>
-          <p class="text-slate-500 text-xs">Cadastre seus produtos para que o gestor tenha metas de CPA e ROAS</p>
+
+      <!-- ── Countries grid view ── -->
+      <div x-show="!selectedCountry" class="p-5">
+        <template x-if="byCountry.length === 0">
+          <div class="text-center py-16 border border-dashed border-slate-700/50 rounded-2xl">
+            <i class="fas fa-earth-americas text-slate-600 text-5xl mb-4 block"></i>
+            <p class="text-slate-400 font-medium mb-1">Nenhum produto cadastrado ainda</p>
+            <p class="text-slate-500 text-sm">Comece adicionando um produto e definindo o país de veiculação</p>
+          </div>
+        </template>
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
+          <template x-for="c in byCountry" :key="c.code">
+            <div @click="selectedCountry=c.code; productSearch=''"
+                 class="rounded-2xl p-5 cursor-pointer transition-all hover:scale-[1.02] group"
+                 style="background:rgba(30,41,59,0.5);border:1px solid rgba(51,65,85,0.5);"
+                 onmouseover="this.style.borderColor='rgba(59,130,246,0.4)';this.style.background='rgba(30,41,59,0.8)'"
+                 onmouseout="this.style.borderColor='rgba(51,65,85,0.5)';this.style.background='rgba(30,41,59,0.5)'">
+              <!-- Flag -->
+              <div class="text-4xl mb-3 text-center" x-text="c.flag"></div>
+              <!-- Country name -->
+              <p class="text-white font-bold text-sm text-center mb-1" x-text="c.name"></p>
+              <p class="text-slate-500 text-xs text-center uppercase tracking-widest mb-3" x-text="c.code === 'other' ? '' : c.code.toUpperCase()"></p>
+              <!-- Stats -->
+              <div class="space-y-1.5">
+                <div class="flex items-center justify-between text-xs">
+                  <span class="text-slate-500">Produtos</span>
+                  <span class="text-blue-400 font-bold" x-text="c.products.length"></span>
+                </div>
+                <div class="flex items-center justify-between text-xs">
+                  <span class="text-slate-500">CPA Médio</span>
+                  <span class="text-amber-400 font-mono" x-text="c.products.length > 0 ? '$'+(c.totalCpaTarget/c.products.length).toFixed(2) : '—'"></span>
+                </div>
+                <div class="flex items-center justify-between text-xs">
+                  <span class="text-slate-500">ROAS Médio</span>
+                  <span class="font-mono font-bold" :style="'color:'+roasColor(c.products.length>0?c.totalRoasTarget/c.products.length:0)" x-text="c.products.length > 0 ? (c.totalRoasTarget/c.products.length).toFixed(1)+'x' : '—'"></span>
+                </div>
+              </div>
+              <!-- Arrow -->
+              <div class="mt-3 flex justify-center">
+                <i class="fas fa-chevron-right text-slate-600 group-hover:text-blue-400 text-xs transition-colors"></i>
+              </div>
+            </div>
+          </template>
         </div>
-      </template>
-      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        <template x-for="p in products" :key="p.id">
-          <div class="bg-slate-800/40 border border-slate-700/40 rounded-2xl p-4 hover:border-slate-600/60 transition-all">
-            <div class="flex items-start justify-between mb-3">
-              <div class="flex items-center gap-2">
-                <div class="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-500/25 flex items-center justify-center">
-                  <i class="fas fa-box text-blue-400 text-sm"></i>
+      </div>
+
+      <!-- ── Products list for selected country ── -->
+      <div x-show="selectedCountry" class="p-5 space-y-3">
+        <template x-if="filteredProducts.length === 0">
+          <div class="text-center py-12 border border-dashed border-slate-700/50 rounded-2xl">
+            <i class="fas fa-box-open text-slate-600 text-4xl mb-3 block"></i>
+            <p class="text-slate-400 text-sm" x-text="productSearch ? 'Nenhum produto encontrado para a busca.' : 'Nenhum produto neste país ainda.'"></p>
+          </div>
+        </template>
+
+        <template x-for="p in filteredProducts" :key="p.id">
+          <div class="rounded-2xl overflow-hidden transition-all" style="background:rgba(22,32,52,0.6);border:1px solid rgba(51,65,85,0.4);">
+
+            <!-- Product header -->
+            <div class="px-5 py-4">
+              <div class="flex items-start gap-3">
+                <!-- Icon -->
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
+                     style="background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.2);">
+                  <i class="fas fa-box text-blue-400"></i>
                 </div>
-                <div>
-                  <p class="text-white font-semibold text-sm" x-text="p.name"></p>
-                  <p class="text-slate-500 text-xs" x-text="p.countries || 'Todos os países'"></p>
+
+                <!-- Name + badges -->
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-start justify-between gap-2 flex-wrap">
+                    <div>
+                      <p class="text-white font-bold text-base leading-tight" x-text="p.name"></p>
+                      <div class="flex items-center gap-2 mt-1.5 flex-wrap">
+                        <!-- Shopify code -->
+                        <template x-if="p.shopify_code">
+                          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono font-bold" style="background:rgba(16,185,129,0.12);color:#34d399;border:1px solid rgba(16,185,129,0.25);">
+                            <i class="fas fa-tag text-xs"></i>
+                            <span x-text="p.shopify_code"></span>
+                          </span>
+                        </template>
+                        <!-- Campaign type -->
+                        <template x-if="p.campaign_type">
+                          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold uppercase" style="background:rgba(139,92,246,0.12);color:#a78bfa;border:1px solid rgba(139,92,246,0.25);" x-text="p.campaign_type"></span>
+                        </template>
+                        <!-- Country badge -->
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs" style="background:rgba(51,65,85,0.5);color:#94a3b8;" x-text="(countryInfo(p.country).flag + ' ' + (p.country||'').toUpperCase())"></span>
+                      </div>
+                    </div>
+                    <!-- Actions -->
+                    <div class="flex gap-1.5 flex-shrink-0">
+                      <button @click="openProductModal(p)" class="w-8 h-8 rounded-lg bg-slate-700/40 hover:bg-blue-500/20 text-slate-400 hover:text-blue-400 flex items-center justify-center transition-all">
+                        <i class="fas fa-pencil text-xs"></i>
+                      </button>
+                      <button @click="deleteProduct(p.id)" class="w-8 h-8 rounded-lg bg-slate-700/40 hover:bg-red-500/20 text-slate-400 hover:text-red-400 flex items-center justify-center transition-all">
+                        <i class="fas fa-trash text-xs"></i>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div class="flex gap-1">
-                <button @click="openProductModal(p)" class="w-7 h-7 rounded-lg bg-slate-700/40 hover:bg-blue-500/20 text-slate-400 hover:text-blue-400 flex items-center justify-center transition-all">
-                  <i class="fas fa-pencil text-xs"></i>
-                </button>
-                <button @click="deleteProduct(p.id)" class="w-7 h-7 rounded-lg bg-slate-700/40 hover:bg-red-500/20 text-slate-400 hover:text-red-400 flex items-center justify-center transition-all">
-                  <i class="fas fa-trash text-xs"></i>
-                </button>
+
+              <!-- Metrics grid -->
+              <div class="grid grid-cols-3 sm:grid-cols-6 gap-2 mt-4">
+                <div class="rounded-xl p-3 text-center" style="background:rgba(15,23,42,0.5);">
+                  <p class="text-slate-500 text-xs mb-0.5">CPA Meta</p>
+                  <p class="text-amber-400 font-mono font-bold text-sm" x-text="(p.cpa_target||0)>0?fmtMoney(p.cpa_target):'—'"></p>
+                </div>
+                <div class="rounded-xl p-3 text-center" style="background:rgba(15,23,42,0.5);">
+                  <p class="text-slate-500 text-xs mb-0.5">ROAS Meta</p>
+                  <p class="font-mono font-bold text-sm" :style="'color:'+roasColor(p.roas_target||0)" x-text="(p.roas_target||0)>0?Number(p.roas_target).toFixed(1)+'x':'—'"></p>
+                </div>
+                <div class="rounded-xl p-3 text-center" style="background:rgba(15,23,42,0.5);">
+                  <p class="text-slate-500 text-xs mb-0.5">Ticket Médio</p>
+                  <p class="text-slate-300 font-mono font-bold text-sm" x-text="(p.avg_ticket||0)>0?fmtMoney(p.avg_ticket):'—'"></p>
+                </div>
+                <div class="rounded-xl p-3 text-center" style="background:rgba(15,23,42,0.5);">
+                  <p class="text-slate-500 text-xs mb-0.5">Tipo Camp.</p>
+                  <p class="text-violet-400 font-bold text-sm uppercase" x-text="p.campaign_type||'—'"></p>
+                </div>
+                <div class="rounded-xl p-3 text-center" style="background:rgba(15,23,42,0.5);">
+                  <p class="text-slate-500 text-xs mb-0.5">Pico</p>
+                  <p class="text-slate-400 text-xs font-medium" x-text="p.peak_months||'—'"></p>
+                </div>
+                <div class="rounded-xl p-3 text-center" style="background:rgba(15,23,42,0.5);">
+                  <p class="text-slate-500 text-xs mb-0.5">Criativos</p>
+                  <p class="text-slate-400 text-xs font-medium line-clamp-1" x-text="p.creative_types||'—'"></p>
+                </div>
+              </div>
+
+              <!-- Notes -->
+              <template x-if="p.notes">
+                <div class="mt-3 px-3 py-2 rounded-lg text-xs text-slate-400 italic" style="background:rgba(51,65,85,0.2);border-left:2px solid rgba(59,130,246,0.3);" x-text="p.notes"></div>
+              </template>
+            </div>
+
+            <!-- ── Campaign analysis section ── -->
+            <div style="border-top:1px solid rgba(51,65,85,0.3);">
+              <button @click="toggleCamps(p.id)"
+                      class="w-full flex items-center justify-between px-5 py-3 text-xs font-medium transition-colors hover:bg-slate-700/20"
+                      :class="expandedCamps[p.id] ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'">
+                <div class="flex items-center gap-2">
+                  <i class="fas fa-chart-bar text-xs"></i>
+                  <span>Campanhas relacionadas</span>
+                  <span class="px-1.5 py-0.5 rounded-md font-bold" style="background:rgba(59,130,246,0.15);color:#60a5fa;" x-text="matchedCampaigns(p).length"></span>
+                  <span class="text-slate-600 text-xs" x-show="matchedCampaigns(p).length > 0">• últimos 30d</span>
+                </div>
+                <i class="fas transition-transform" :class="expandedCamps[p.id]?'fa-chevron-up':'fa-chevron-down'"></i>
+              </button>
+
+              <!-- Campaigns list -->
+              <div x-show="expandedCamps[p.id]" x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" style="display:none;">
+                <template x-if="matchedCampaigns(p).length === 0">
+                  <div class="px-5 pb-4 text-center">
+                    <p class="text-slate-600 text-xs italic">Nenhuma campanha com esse código/nome nos últimos 30 dias.</p>
+                    <p class="text-slate-700 text-xs mt-1">Verifique se o código Shopify ou nome do produto bate com os nomes de campanha.</p>
+                  </div>
+                </template>
+                <template x-if="matchedCampaigns(p).length > 0">
+                  <div class="px-4 pb-4 space-y-2">
+                    <!-- Campaign name parser guide -->
+                    <div class="px-3 py-2 rounded-lg text-xs mb-3" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);">
+                      <div class="flex items-center gap-2 flex-wrap text-slate-500">
+                        <span class="text-blue-400 font-bold font-mono">[país]</span>
+                        <span class="text-violet-400 font-bold font-mono">[tipo]</span>
+                        <span class="text-green-400 font-bold font-mono">[produto]</span>
+                        <span class="text-amber-400 font-bold font-mono">[data]</span>
+                        <span class="text-slate-500 font-mono">- shopify_code</span>
+                      </div>
+                    </div>
+
+                    <template x-for="camp in matchedCampaigns(p)" :key="camp.id">
+                      <div class="rounded-xl p-3" style="background:rgba(15,23,42,0.5);border:1px solid rgba(51,65,85,0.3);">
+                        <!-- Parsed name display -->
+                        <div class="flex items-start justify-between gap-2 mb-2.5">
+                          <div class="min-w-0 flex-1">
+                            <!-- Rendered parts -->
+                            <div class="flex items-center gap-1 flex-wrap text-xs font-mono mb-1">
+                              <template x-if="parseCampaignName(camp.name).country">
+                                <span class="px-1.5 py-0.5 rounded font-bold" style="background:rgba(59,130,246,0.15);color:#60a5fa;" x-text="'['+parseCampaignName(camp.name).country+']'"></span>
+                              </template>
+                              <template x-if="parseCampaignName(camp.name).type">
+                                <span class="px-1.5 py-0.5 rounded font-bold" style="background:rgba(139,92,246,0.15);color:#a78bfa;" x-text="'['+parseCampaignName(camp.name).type+']'"></span>
+                              </template>
+                              <template x-if="parseCampaignName(camp.name).product_name">
+                                <span class="px-1.5 py-0.5 rounded font-bold" style="background:rgba(16,185,129,0.12);color:#34d399;" x-text="'['+parseCampaignName(camp.name).product_name+']'"></span>
+                              </template>
+                              <template x-if="parseCampaignName(camp.name).start_date">
+                                <span class="px-1.5 py-0.5 rounded" style="background:rgba(245,158,11,0.12);color:#fbbf24;" x-text="'['+parseCampaignName(camp.name).start_date+']'"></span>
+                              </template>
+                              <template x-if="parseCampaignName(camp.name).shopify_code">
+                                <span class="text-slate-600">-</span>
+                                <span class="px-1.5 py-0.5 rounded font-bold" style="background:rgba(51,65,85,0.4);color:#94a3b8;" x-text="parseCampaignName(camp.name).shopify_code"></span>
+                              </template>
+                            </div>
+                            <p class="text-slate-600 text-xs truncate" x-text="camp.name"></p>
+                          </div>
+                          <span class="text-xs px-2 py-0.5 rounded-full flex-shrink-0" :style="'background:'+campStatusColor(camp.status)+'20;color:'+campStatusColor(camp.status)" x-text="camp.status==='active'?'Ativa':camp.status==='paused'?'Pausada':'Inativa'"></span>
+                        </div>
+                        <!-- Metrics row -->
+                        <div class="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                          <div class="text-center p-1.5 rounded-lg" style="background:rgba(51,65,85,0.2);">
+                            <p class="text-blue-300 font-bold text-xs" x-text="'$'+Number(camp.spend||0).toFixed(2)"></p>
+                            <p class="text-slate-600 text-xs">Gasto</p>
+                          </div>
+                          <div class="text-center p-1.5 rounded-lg" style="background:rgba(51,65,85,0.2);">
+                            <p class="text-green-400 font-bold text-xs" x-text="camp.conversions||0"></p>
+                            <p class="text-slate-600 text-xs">Conv.</p>
+                          </div>
+                          <div class="text-center p-1.5 rounded-lg" style="background:rgba(51,65,85,0.2);">
+                            <p class="font-bold text-xs" :style="'color:'+roasColor(camp.roas||0)" x-text="(camp.roas||0)>0?Number(camp.roas).toFixed(2)+'x':'—'"></p>
+                            <p class="text-slate-600 text-xs">ROAS</p>
+                          </div>
+                          <div class="text-center p-1.5 rounded-lg" style="background:rgba(51,65,85,0.2);">
+                            <p class="text-amber-400 font-bold text-xs" x-text="(camp.cpa||0)>0?'$'+Number(camp.cpa).toFixed(2):'—'"></p>
+                            <p class="text-slate-600 text-xs">CPA</p>
+                          </div>
+                          <div class="text-center p-1.5 rounded-lg hidden sm:block" style="background:rgba(51,65,85,0.2);">
+                            <p class="text-slate-400 font-bold text-xs" x-text="Number(camp.ctr||0).toFixed(2)+'%'"></p>
+                            <p class="text-slate-600 text-xs">CTR</p>
+                          </div>
+                          <div class="text-center p-1.5 rounded-lg hidden sm:block" style="background:rgba(51,65,85,0.2);">
+                            <p class="text-emerald-400 font-bold text-xs" x-text="(camp.revenue||0)>0?'$'+Number(camp.revenue).toFixed(2):'—'"></p>
+                            <p class="text-slate-600 text-xs">Receita</p>
+                          </div>
+                        </div>
+                        <!-- CPA vs target comparison -->
+                        <template x-if="(camp.cpa||0) > 0 && (p.cpa_target||0) > 0">
+                          <div class="mt-2 flex items-center gap-2 text-xs">
+                            <span class="text-slate-500">CPA atual vs meta:</span>
+                            <span :class="(camp.cpa||0) <= (p.cpa_target||0) ? 'text-green-400' : 'text-red-400'" class="font-bold"
+                                  x-text="(camp.cpa<=p.cpa_target ? '✓ dentro da meta' : '✗ acima da meta +'+((camp.cpa-p.cpa_target)/p.cpa_target*100).toFixed(0)+'%')"></span>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </template>
               </div>
             </div>
-            <div class="grid grid-cols-3 gap-2">
-              <div class="bg-slate-900/40 rounded-xl p-2.5 text-center">
-                <p class="text-slate-400 text-xs">CPA Meta</p>
-                <p class="text-white font-mono font-bold text-sm" x-text="'$'+Number(p.cpa_target||0).toFixed(2)"></p>
-              </div>
-              <div class="bg-slate-900/40 rounded-xl p-2.5 text-center">
-                <p class="text-slate-400 text-xs">ROAS Meta</p>
-                <p class="text-white font-mono font-bold text-sm" x-text="Number(p.roas_target||0).toFixed(1)+'x'"></p>
-              </div>
-              <div class="bg-slate-900/40 rounded-xl p-2.5 text-center">
-                <p class="text-slate-400 text-xs">Ticket</p>
-                <p class="text-white font-mono font-bold text-sm" x-text="'$'+Number(p.avg_ticket||0).toFixed(0)"></p>
-              </div>
-            </div>
-            <template x-if="p.notes">
-              <p class="text-slate-500 text-xs mt-3 line-clamp-2" x-text="p.notes"></p>
-            </template>
+
           </div>
         </template>
       </div>
     </div>
 
-    <!-- Knowledge Tab -->
+    <!-- ══ KNOWLEDGE TAB ═════════════════════════════════════════════════ -->
     <div x-show="activeTab==='knowledge'" class="p-5">
       <div class="flex items-center justify-between mb-4">
         <div>
           <p class="text-white font-semibold">Base de Conhecimento</p>
-          <p class="text-slate-400 text-xs mt-0.5">Informações sobre mercado, público, criativos e estratégias que o gestor usará</p>
+          <p class="text-slate-400 text-xs mt-0.5">Informações que o gestor IA usará nas análises</p>
         </div>
         <button @click="openKnowledgeModal(null)"
                 class="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-white transition-all"
@@ -859,13 +1204,12 @@ Alpine.data('KnowledgePage', () => ({
         <div class="text-center py-12 border border-dashed border-slate-700/50 rounded-2xl">
           <i class="fas fa-brain text-slate-600 text-4xl mb-3"></i>
           <p class="text-slate-400 mb-2">Base de conhecimento vazia</p>
-          <p class="text-slate-500 text-xs">Adicione informações sobre seu nicho, público, concorrentes e estratégias</p>
           <div class="flex flex-wrap gap-2 justify-center mt-4">
             ${[
-              {cat:'market',label:'Mercado',ex:'E-commerce de suplementos, nicho fitness'},
-              {cat:'audience',label:'Público',ex:'Mulheres 25-45, interesse em saúde'},
-              {cat:'creative',label:'Criativos',ex:'UGC com depoimentos funciona melhor'},
-              {cat:'strategy',label:'Estratégia',ex:'CBO com 3-5 adsets por campanha'},
+              {cat:'market',  label:'Mercado',    ex:'E-commerce de suplementos, nicho fitness'},
+              {cat:'audience',label:'Público',    ex:'Mulheres 25-45, interesse em saúde'},
+              {cat:'creative',label:'Criativos',  ex:'UGC com depoimentos funciona melhor'},
+              {cat:'strategy',label:'Estratégia', ex:'CBO com 3-5 adsets por campanha'},
             ].map(e=>`
             <button @click="knowledgeForm={category:'${e.cat}',title:'${e.label}',content:'${e.ex}'}; showKnowledgeModal=true"
                     class="text-xs px-3 py-1.5 rounded-lg border border-slate-700/50 text-slate-400 hover:border-slate-500 hover:text-slate-300 transition-all">
@@ -903,14 +1247,14 @@ Alpine.data('KnowledgePage', () => ({
       </div>
     </div>
 
-    <!-- Preview Tab -->
+    <!-- ══ PREVIEW TAB ═══════════════════════════════════════════════════ -->
     <div x-show="activeTab==='preview'" class="p-5">
       <p class="text-slate-400 text-sm mb-4">Resumo do que o gestor IA sabe sobre o seu negócio:</p>
       <div class="bg-slate-900/60 border border-slate-700/40 rounded-2xl p-4 font-mono text-xs text-slate-300 leading-relaxed max-h-96 overflow-y-auto space-y-3">
         <div x-show="products.length > 0">
-          <p class="text-blue-400 font-semibold">## PRODUTOS E METAS:</p>
+          <p class="text-blue-400 font-semibold">## PRODUTOS E METAS (por país):</p>
           <template x-for="p in products" :key="p.id">
-            <p x-text="'• '+p.name+': CPA $'+Number(p.cpa_target).toFixed(2)+' | ROAS '+Number(p.roas_target).toFixed(1)+'x | Ticket $'+Number(p.avg_ticket).toFixed(0)+(p.countries?' | '+p.countries:'')"></p>
+            <p x-text="'• ['+((p.country||'?').toUpperCase())+'] '+p.name+(p.shopify_code?' ('+p.shopify_code+')':'')+': CPA $'+Number(p.cpa_target).toFixed(2)+' | ROAS '+Number(p.roas_target).toFixed(1)+'x | Ticket $'+Number(p.avg_ticket).toFixed(0)+(p.campaign_type?' | '+p.campaign_type.toUpperCase():'')"></p>
           </template>
         </div>
         <div x-show="knowledge.length > 0">
@@ -920,59 +1264,94 @@ Alpine.data('KnowledgePage', () => ({
           </template>
         </div>
         <template x-if="products.length===0 && knowledge.length===0">
-          <p class="text-slate-500 italic">Nenhum conhecimento cadastrado ainda. Adicione produtos e informações nas abas acima.</p>
+          <p class="text-slate-500 italic">Nenhum conhecimento cadastrado ainda.</p>
         </template>
       </div>
     </div>
   </div>
 
-  <!-- Product Modal -->
+  <!-- ══ PRODUCT MODAL ══════════════════════════════════════════════════════ -->
   <div x-show="showProductModal" @click="showProductModal=false" style="position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.75);z-index:9999;display:none;overflow-y:auto;">
     <div style="min-height:100%;display:flex;align-items:center;justify-content:center;padding:1.5rem;">
-    <div @click.stop style="width:100%;max-width:540px;max-height:90vh;overflow-y:auto;border-radius:16px;padding:1.5rem;background:linear-gradient(160deg,rgba(22,32,52,0.98),rgba(12,18,36,0.99));border:1px solid rgba(71,85,105,0.4);box-shadow:0 48px 120px rgba(0,0,0,0.85),0 0 80px rgba(59,130,246,0.06);animation:modalIn 0.28s cubic-bezier(0.34,1.2,0.64,1);">
+    <div @click.stop style="width:100%;max-width:580px;max-height:92vh;overflow-y:auto;border-radius:16px;padding:1.5rem;background:linear-gradient(160deg,rgba(22,32,52,0.98),rgba(12,18,36,0.99));border:1px solid rgba(71,85,105,0.4);box-shadow:0 48px 120px rgba(0,0,0,0.85),0 0 80px rgba(59,130,246,0.06);animation:modalIn 0.28s cubic-bezier(0.34,1.2,0.64,1);">
       <div class="flex items-center justify-between mb-5">
         <h3 class="text-white font-bold text-lg" x-text="editProductId ? 'Editar Produto' : 'Novo Produto'"></h3>
         <button @click="showProductModal=false" class="w-8 h-8 rounded-lg bg-slate-700/40 text-slate-400 hover:text-white flex items-center justify-center"><i class="fas fa-times text-sm"></i></button>
       </div>
       <div class="space-y-4">
-        <div>
-          <label class="text-slate-400 text-xs font-medium uppercase tracking-wide block mb-1.5">Nome do Produto *</label>
-          <input x-model="productForm.name" type="text" placeholder="Ex: PROD001 — Suplemento XYZ" class="input-field w-full">
-        </div>
-        <div class="grid grid-cols-3 gap-3">
+
+        <!-- Section: Identificação -->
+        <div class="rounded-xl p-3 space-y-3" style="background:rgba(15,23,42,0.4);border:1px solid rgba(51,65,85,0.3);">
+          <p class="text-slate-400 text-xs font-semibold uppercase tracking-wider">Identificação</p>
           <div>
-            <label class="text-slate-400 text-xs font-medium uppercase tracking-wide block mb-1.5">CPA Meta ($)</label>
-            <input x-model.number="productForm.cpa_target" type="number" step="0.01" class="input-field w-full">
+            <label class="text-slate-400 text-xs font-medium block mb-1.5">Nome do Produto *</label>
+            <input x-model="productForm.name" type="text" placeholder="Ex: Suplemento XYZ" class="input-field w-full">
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-slate-400 text-xs font-medium block mb-1.5">País *</label>
+              <input x-model="productForm.country" type="text" placeholder="mx, br, us, ar..."
+                     class="input-field w-full font-mono uppercase"
+                     style="text-transform:lowercase;">
+              <p class="text-slate-600 text-xs mt-1">Código ISO do país (ex: mx, br, co)</p>
+            </div>
+            <div>
+              <label class="text-slate-400 text-xs font-medium block mb-1.5">Código Shopify</label>
+              <input x-model="productForm.shopify_code" type="text" placeholder="Ex: 123456789" class="input-field w-full font-mono">
+            </div>
           </div>
           <div>
-            <label class="text-slate-400 text-xs font-medium uppercase tracking-wide block mb-1.5">ROAS Meta</label>
-            <input x-model.number="productForm.roas_target" type="number" step="0.1" class="input-field w-full">
+            <label class="text-slate-400 text-xs font-medium block mb-1.5">Tipo de Campanha</label>
+            <div class="flex gap-2 flex-wrap">
+              ${['ABO','CBO','ABO Alpha','CBO Alpha','Remarketing','Prospecting'].map(t=>`
+              <button type="button" @click="productForm.campaign_type = productForm.campaign_type==='${t}' ? '' : '${t}'"
+                      :class="productForm.campaign_type==='${t}' ? 'border-violet-500/50 bg-violet-500/15 text-violet-300' : 'border-slate-700/50 text-slate-500 hover:border-slate-600 hover:text-slate-300'"
+                      class="px-3 py-1.5 rounded-lg border text-xs font-bold transition-all">${t}</button>`).join('')}
+              <input x-model="productForm.campaign_type" type="text" placeholder="outro..." class="input-field py-1.5 text-xs" style="width:90px;">
+            </div>
+          </div>
+        </div>
+
+        <!-- Section: Metas financeiras -->
+        <div class="rounded-xl p-3 space-y-3" style="background:rgba(15,23,42,0.4);border:1px solid rgba(51,65,85,0.3);">
+          <p class="text-slate-400 text-xs font-semibold uppercase tracking-wider">Metas Financeiras</p>
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="text-slate-400 text-xs font-medium block mb-1.5">CPA Meta ($)</label>
+              <input x-model.number="productForm.cpa_target" type="number" step="0.01" min="0" class="input-field w-full">
+            </div>
+            <div>
+              <label class="text-slate-400 text-xs font-medium block mb-1.5">ROAS Meta</label>
+              <input x-model.number="productForm.roas_target" type="number" step="0.1" min="0" class="input-field w-full">
+            </div>
+            <div>
+              <label class="text-slate-400 text-xs font-medium block mb-1.5">Ticket Médio ($)</label>
+              <input x-model.number="productForm.avg_ticket" type="number" step="0.01" min="0" class="input-field w-full">
+            </div>
+          </div>
+        </div>
+
+        <!-- Section: Contexto -->
+        <div class="rounded-xl p-3 space-y-3" style="background:rgba(15,23,42,0.4);border:1px solid rgba(51,65,85,0.3);">
+          <p class="text-slate-400 text-xs font-semibold uppercase tracking-wider">Contexto Estratégico</p>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-slate-400 text-xs font-medium block mb-1.5">Meses de Pico</label>
+              <input x-model="productForm.peak_months" type="text" placeholder="Nov, Dez, Jan" class="input-field w-full">
+            </div>
+            <div>
+              <label class="text-slate-400 text-xs font-medium block mb-1.5">Tipos de Criativo</label>
+              <input x-model="productForm.creative_types" type="text" placeholder="UGC, VSL, Carrossel" class="input-field w-full">
+            </div>
           </div>
           <div>
-            <label class="text-slate-400 text-xs font-medium uppercase tracking-wide block mb-1.5">Ticket Médio ($)</label>
-            <input x-model.number="productForm.avg_ticket" type="number" step="0.01" class="input-field w-full">
+            <label class="text-slate-400 text-xs font-medium block mb-1.5">Notas Estratégicas</label>
+            <textarea x-model="productForm.notes" rows="3" placeholder="Informações importantes para o gestor sobre este produto..." class="input-field w-full resize-none"></textarea>
           </div>
         </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="text-slate-400 text-xs font-medium uppercase tracking-wide block mb-1.5">Países</label>
-            <input x-model="productForm.countries" type="text" placeholder="BR, US, MX" class="input-field w-full">
-          </div>
-          <div>
-            <label class="text-slate-400 text-xs font-medium uppercase tracking-wide block mb-1.5">Meses de Pico</label>
-            <input x-model="productForm.peak_months" type="text" placeholder="Nov, Dez, Jan" class="input-field w-full">
-          </div>
-        </div>
-        <div>
-          <label class="text-slate-400 text-xs font-medium uppercase tracking-wide block mb-1.5">Tipos de Criativo</label>
-          <input x-model="productForm.creative_types" type="text" placeholder="UGC, VSL, Carrossel" class="input-field w-full">
-        </div>
-        <div>
-          <label class="text-slate-400 text-xs font-medium uppercase tracking-wide block mb-1.5">Notas Estratégicas</label>
-          <textarea x-model="productForm.notes" rows="3" placeholder="Informações importantes para o gestor sobre este produto..." class="input-field w-full resize-none"></textarea>
-        </div>
+
       </div>
-      <div class="flex gap-3 mt-6">
+      <div class="flex gap-3 mt-5">
         <button @click="showProductModal=false" class="flex-1 px-4 py-2.5 rounded-xl border border-slate-700/50 text-slate-400 hover:text-white hover:border-slate-600 transition-all text-sm">Cancelar</button>
         <button @click="saveProduct()" :disabled="saving" class="flex-1 px-4 py-2.5 rounded-xl text-white font-semibold text-sm transition-all" style="background:linear-gradient(135deg,#3b82f6,#2563eb);">
           <span x-text="saving ? 'Salvando...' : 'Salvar Produto'"></span>
@@ -982,7 +1361,7 @@ Alpine.data('KnowledgePage', () => ({
     </div>
   </div>
 
-  <!-- Knowledge Modal -->
+  <!-- ══ KNOWLEDGE MODAL ══════════════════════════════════════════════════ -->
   <div x-show="showKnowledgeModal" @click="showKnowledgeModal=false" style="position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.75);z-index:9999;display:none;overflow-y:auto;">
     <div style="min-height:100%;display:flex;align-items:center;justify-content:center;padding:1.5rem;">
     <div @click.stop style="width:100%;max-width:540px;max-height:90vh;overflow-y:auto;border-radius:16px;padding:1.5rem;background:linear-gradient(160deg,rgba(22,32,52,0.98),rgba(12,18,36,0.99));border:1px solid rgba(71,85,105,0.4);box-shadow:0 48px 120px rgba(0,0,0,0.85),0 0 80px rgba(59,130,246,0.06);animation:modalIn 0.28s cubic-bezier(0.34,1.2,0.64,1);">
@@ -1007,7 +1386,7 @@ Alpine.data('KnowledgePage', () => ({
         </div>
         <div>
           <label class="text-slate-400 text-xs font-medium uppercase tracking-wide block mb-1.5">Conteúdo *</label>
-          <textarea x-model="knowledgeForm.content" rows="5" placeholder="Descreva este conhecimento em detalhes. Quanto mais específico, melhor o gestor entenderá seu negócio..." class="input-field w-full resize-none"></textarea>
+          <textarea x-model="knowledgeForm.content" rows="5" placeholder="Descreva este conhecimento em detalhes..." class="input-field w-full resize-none"></textarea>
         </div>
       </div>
       <div class="flex gap-3 mt-6">
@@ -1021,8 +1400,9 @@ Alpine.data('KnowledgePage', () => ({
   </div>
 
 </div>`;
-  }
-}));
+    },
+  };
+});
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  CHAT PAGE — Conversar com o gestor IA

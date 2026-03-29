@@ -203,6 +203,37 @@ function toast(type, message) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  DASHBOARD
 // ══════════════════════════════════════════════════════════════════════════════
+// ── WORLD CLOCK DATA ─────────────────────────────────────────────────────────
+const ALL_TIMEZONES = [
+  { code:'br',  flag:'🇧🇷', name:'Brasil',         tz:'America/Sao_Paulo'    },
+  { code:'mx',  flag:'🇲🇽', name:'México',         tz:'America/Mexico_City'  },
+  { code:'us',  flag:'🇺🇸', name:'EUA (NY)',        tz:'America/New_York'     },
+  { code:'us-la',flag:'🇺🇸',name:'EUA (LA)',        tz:'America/Los_Angeles'  },
+  { code:'ar',  flag:'🇦🇷', name:'Argentina',       tz:'America/Argentina/Buenos_Aires' },
+  { code:'co',  flag:'🇨🇴', name:'Colômbia',        tz:'America/Bogota'       },
+  { code:'cl',  flag:'🇨🇱', name:'Chile',           tz:'America/Santiago'     },
+  { code:'pe',  flag:'🇵🇪', name:'Peru',            tz:'America/Lima'         },
+  { code:'ec',  flag:'🇪🇨', name:'Equador',         tz:'America/Guayaquil'    },
+  { code:'uy',  flag:'🇺🇾', name:'Uruguai',         tz:'America/Montevideo'   },
+  { code:'py',  flag:'🇵🇾', name:'Paraguai',        tz:'America/Asuncion'     },
+  { code:'bo',  flag:'🇧🇴', name:'Bolívia',         tz:'America/La_Paz'       },
+  { code:'ve',  flag:'🇻🇪', name:'Venezuela',       tz:'America/Caracas'      },
+  { code:'ca',  flag:'🇨🇦', name:'Canadá',          tz:'America/Toronto'      },
+  { code:'es',  flag:'🇪🇸', name:'Espanha',         tz:'Europe/Madrid'        },
+  { code:'pt',  flag:'🇵🇹', name:'Portugal',        tz:'Europe/Lisbon'        },
+  { code:'gb',  flag:'🇬🇧', name:'Reino Unido',     tz:'Europe/London'        },
+  { code:'de',  flag:'🇩🇪', name:'Alemanha',        tz:'Europe/Berlin'        },
+  { code:'fr',  flag:'🇫🇷', name:'França',          tz:'Europe/Paris'         },
+  { code:'it',  flag:'🇮🇹', name:'Itália',          tz:'Europe/Rome'          },
+  { code:'au',  flag:'🇦🇺', name:'Austrália',       tz:'Australia/Sydney'     },
+  { code:'jp',  flag:'🇯🇵', name:'Japão',           tz:'Asia/Tokyo'           },
+  { code:'cn',  flag:'🇨🇳', name:'China',           tz:'Asia/Shanghai'        },
+  { code:'in',  flag:'🇮🇳', name:'Índia',           tz:'Asia/Kolkata'         },
+  { code:'ae',  flag:'🇦🇪', name:'Dubai',           tz:'Asia/Dubai'           },
+];
+
+const CLOCK_STORAGE_KEY = 'meta_clock_countries';
+
 Alpine.data('Dashboard', () => ({
   period: 'last_7d',
   viewBy: 'account',
@@ -213,11 +244,65 @@ Alpine.data('Dashboard', () => ({
   charts: {},
   tableSearch: '', tablePage: 0, tablePerPage: 10, tableSort: 'spend', tableSortDir: 'desc',
   apiData: null,
+  // ── World clock ──────────────────────────────────────────────────────────
+  clockTick: 0,
+  _clockInterval: null,
+  clockPickerOpen: false,
+  clockCodes: JSON.parse(localStorage.getItem(CLOCK_STORAGE_KEY) || '["br","mx","us","co","ar"]'),
+
+  get clockCountries() {
+    return this.clockCodes
+      .map(c => ALL_TIMEZONES.find(t => t.code === c))
+      .filter(Boolean);
+  },
+  get allTimezones() { return ALL_TIMEZONES; },
+
+  clockTime(tz) {
+    void this.clockTick; // reactive dependency
+    try {
+      return new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit', second:'2-digit', timeZone: tz });
+    } catch { return '--:--:--'; }
+  },
+  clockDate(tz) {
+    void this.clockTick;
+    try {
+      return new Date().toLocaleDateString('pt-BR', { weekday:'short', day:'2-digit', month:'short', timeZone: tz });
+    } catch { return ''; }
+  },
+  clockIsNight(tz) {
+    void this.clockTick;
+    try {
+      const h = parseInt(new Date().toLocaleString('en-US', { hour:'2-digit', hour12:false, timeZone: tz }));
+      return h >= 22 || h < 6;
+    } catch { return false; }
+  },
+  clockIsEarlyMorning(tz) {
+    void this.clockTick;
+    try {
+      const h = parseInt(new Date().toLocaleString('en-US', { hour:'2-digit', hour12:false, timeZone: tz }));
+      return h >= 6 && h < 9;
+    } catch { return false; }
+  },
+  clockIsGoodTime(tz) {
+    void this.clockTick;
+    try {
+      const h = parseInt(new Date().toLocaleString('en-US', { hour:'2-digit', hour12:false, timeZone: tz }));
+      return h >= 9 && h < 22;
+    } catch { return true; }
+  },
+  toggleClockCountry(code) {
+    const idx = this.clockCodes.indexOf(code);
+    if (idx === -1) this.clockCodes.push(code);
+    else this.clockCodes.splice(idx, 1);
+    localStorage.setItem(CLOCK_STORAGE_KEY, JSON.stringify(this.clockCodes));
+  },
 
   async init() {
     await this.fetchDashboard();
     this.$watch('period', async v => { if(v!=='custom') { await this.fetchDashboard(); } });
     this.$watch('viewBy', () => this.$nextTick(()=>this.buildCharts()));
+    // World clock — tick every second
+    this._clockInterval = setInterval(() => { this.clockTick++; }, 1000);
   },
 
   async fetchDashboard() {
@@ -349,6 +434,105 @@ Alpine.data('Dashboard', () => ({
         <button @click="$dispatch('navigate',{page:'connections'})" class="btn btn-sm whitespace-nowrap" style="background:rgba(59,130,246,0.2);border:1px solid rgba(59,130,246,0.4);color:#60a5fa;">
           <i class="fas fa-plus text-xs"></i> Conectar API
         </button>
+      </div>
+
+      <!-- ── World Clock Widget ──────────────────────────────────────────── -->
+      <div class="glass rounded-2xl overflow-hidden">
+        <!-- Header -->
+        <div class="px-5 py-3 flex items-center justify-between" style="border-bottom:1px solid rgba(51,65,85,0.3);">
+          <div class="flex items-center gap-2.5">
+            <i class="fas fa-clock text-blue-400 text-sm"></i>
+            <span class="text-white font-semibold text-sm">Fusos Horários</span>
+            <span class="badge text-xs" style="background:rgba(59,130,246,0.12);color:#60a5fa;border:1px solid rgba(59,130,246,0.2);" x-text="clockCodes.length + ' países'"></span>
+          </div>
+          <!-- Add / manage button -->
+          <div class="relative">
+            <button @click="clockPickerOpen=!clockPickerOpen"
+              :class="clockPickerOpen ? 'bg-blue-600/30 text-blue-300 border-blue-500/40' : 'text-slate-400 border-slate-700/50 hover:text-blue-300 hover:border-blue-500/30'"
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all">
+              <i class="fas fa-plus text-xs"></i> Gerenciar países
+            </button>
+            <!-- Picker dropdown -->
+            <div x-show="clockPickerOpen" @click.outside="clockPickerOpen=false"
+                 x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                 class="absolute right-0 top-full mt-1 z-50 rounded-xl shadow-2xl"
+                 style="display:none;width:320px;background:rgba(15,23,42,0.98);border:1px solid rgba(59,130,246,0.2);backdrop-filter:blur(20px);">
+              <div class="px-4 py-2.5 flex items-center justify-between" style="border-bottom:1px solid rgba(51,65,85,0.4);">
+                <p class="text-white font-semibold text-sm">Selecionar Países</p>
+                <div class="flex gap-2">
+                  <button @click="clockCodes=['br','mx','us','co','ar']; localStorage.setItem('meta_clock_countries', JSON.stringify(clockCodes))" class="text-xs text-slate-500 hover:text-blue-400 transition-colors">Padrão</button>
+                  <button @click="clockCodes=[]; localStorage.setItem('meta_clock_countries', JSON.stringify([]))" class="text-xs text-slate-500 hover:text-red-400 transition-colors">Limpar</button>
+                </div>
+              </div>
+              <div class="p-3 grid grid-cols-2 gap-1.5 overflow-y-auto" style="max-height:360px;">
+                <template x-for="tz in allTimezones" :key="tz.code">
+                  <button @click="toggleClockCountry(tz.code)"
+                    :class="clockCodes.includes(tz.code) ? 'border-blue-500/50 bg-blue-500/10 text-blue-300' : 'border-slate-700/40 text-slate-500 hover:border-slate-600 hover:text-slate-300'"
+                    class="flex items-center gap-2 px-2.5 py-2 rounded-lg border transition-all text-xs text-left">
+                    <span class="text-base flex-shrink-0" x-text="tz.flag"></span>
+                    <div class="min-w-0 flex-1">
+                      <p class="font-medium truncate" x-text="tz.name"></p>
+                    </div>
+                    <i class="fas text-xs flex-shrink-0 transition-colors" :class="clockCodes.includes(tz.code) ? 'fa-check-circle text-blue-400' : 'fa-circle text-slate-700'"></i>
+                  </button>
+                </template>
+              </div>
+              <div class="px-4 py-2.5" style="border-top:1px solid rgba(51,65,85,0.4);">
+                <button @click="clockPickerOpen=false" class="btn btn-primary btn-sm w-full">Fechar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Clock cards -->
+        <div class="p-4">
+          <template x-if="clockCodes.length === 0">
+            <div class="text-center py-6 text-slate-500 text-sm">
+              <i class="fas fa-earth-americas text-slate-600 text-2xl mb-2 block"></i>
+              Nenhum país adicionado. Clique em "Gerenciar países" para adicionar.
+            </div>
+          </template>
+          <div class="flex flex-wrap gap-3">
+            <template x-for="c in clockCountries" :key="c.code">
+              <div class="rounded-xl px-4 py-3 flex items-center gap-3 transition-all"
+                   :style="clockIsNight(c.tz) ? 'background:rgba(15,23,42,0.8);border:1px solid rgba(51,65,85,0.4);' : clockIsEarlyMorning(c.tz) ? 'background:rgba(30,41,59,0.6);border:1px solid rgba(245,158,11,0.2);' : 'background:rgba(30,41,59,0.5);border:1px solid rgba(59,130,246,0.15);'">
+                <!-- Flag + night/day icon -->
+                <div class="relative flex-shrink-0">
+                  <span class="text-2xl" x-text="c.flag"></span>
+                  <span class="absolute -bottom-0.5 -right-1 text-xs"
+                        x-text="clockIsNight(c.tz) ? '🌙' : clockIsEarlyMorning(c.tz) ? '🌅' : '☀️'"></span>
+                </div>
+                <!-- Info -->
+                <div>
+                  <p class="text-slate-400 text-xs leading-none mb-1" x-text="c.name"></p>
+                  <p class="font-mono font-bold text-base leading-none tabular-nums"
+                     :class="clockIsNight(c.tz) ? 'text-slate-400' : clockIsEarlyMorning(c.tz) ? 'text-amber-400' : 'text-white'"
+                     x-text="clockTime(c.tz)"></p>
+                  <p class="text-slate-600 text-xs mt-0.5 leading-none capitalize" x-text="clockDate(c.tz)"></p>
+                </div>
+                <!-- Traffic light indicator -->
+                <div class="ml-1 w-2 h-2 rounded-full flex-shrink-0"
+                     :style="clockIsGoodTime(c.tz) ? 'background:#22c55e;box-shadow:0 0 6px rgba(34,197,94,0.6)' : clockIsEarlyMorning(c.tz) ? 'background:#f59e0b;box-shadow:0 0 6px rgba(245,158,11,0.6)' : 'background:#475569'""></div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Legend -->
+          <div x-show="clockCodes.length > 0" class="flex items-center gap-4 mt-3 px-1">
+            <div class="flex items-center gap-1.5 text-xs text-slate-600">
+              <div class="w-2 h-2 rounded-full" style="background:#22c55e;box-shadow:0 0 5px rgba(34,197,94,0.5)"></div>
+              Boa hora para subir (9h–22h)
+            </div>
+            <div class="flex items-center gap-1.5 text-xs text-slate-600">
+              <div class="w-2 h-2 rounded-full" style="background:#f59e0b"></div>
+              Cedo (6h–9h)
+            </div>
+            <div class="flex items-center gap-1.5 text-xs text-slate-600">
+              <div class="w-2 h-2 rounded-full" style="background:#475569"></div>
+              Madrugada (22h–6h)
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Filters -->

@@ -30,6 +30,11 @@ Alpine.data('AccountDetailPage', function() {
     expandedAdset: {},
     ads: {},
     adsLoading: {},
+    demographics: null,
+    demographicsLoading: false,
+    demoView: 'gender',
+    demoPickerOpen: false,
+    demoCols: ['impressions', 'clicks', 'ctr', 'conversions', 'cpa', 'roas', 'revenue'],
     PERIODS,
 
     async init() {
@@ -46,6 +51,7 @@ Alpine.data('AccountDetailPage', function() {
       this.adsets = {};
       this.expandedAdset = {};
       this.ads = {};
+      this.demographics = null;
       this.load();
     },
 
@@ -73,10 +79,30 @@ Alpine.data('AccountDetailPage', function() {
       if (data) {
         this.account = data;
         this.campaigns = data.campaigns || [];
+        this.loadDemographics();
       } else {
         console.error('[AccountDetail] API.get returned null — check network tab for errors');
       }
       this.loading = false;
+    },
+
+    toggleDemoCol(key) {
+      const idx = this.demoCols.indexOf(key);
+      if (idx === -1) this.demoCols.push(key);
+      else this.demoCols.splice(idx, 1);
+    },
+
+    async loadDemographics() {
+      if (!this.accId) return;
+      this.demographicsLoading = true;
+      this.demographics = null;
+      let url = `/api/accounts/${this.accId}/demographics?period=${this.period}`;
+      if (this.period === 'custom' && this.customFrom && this.customTo) {
+        url = `/api/accounts/${this.accId}/demographics?period=custom&date_from=${this.customFrom}&date_to=${this.customTo}`;
+      }
+      const data = await API.get(url);
+      this.demographics = data || null;
+      this.demographicsLoading = false;
     },
 
     async setPeriod(val) {
@@ -490,6 +516,280 @@ Alpine.data('AccountDetailPage', function() {
         </div>
       </div>
     </template>
+  </div>
+
+  <!-- ── Análise de Público ─────────────────────────────────────────────── -->
+  <div x-show="!loading && account" class="glass rounded-2xl overflow-hidden">
+
+    <!-- Header -->
+    <div class="px-5 py-3 flex items-center justify-between flex-wrap gap-2" style="border-bottom:1px solid rgba(51,65,85,0.4);">
+      <div class="flex items-center gap-2.5">
+        <i class="fas fa-users text-violet-400 text-sm"></i>
+        <h3 class="text-white font-semibold text-sm">Análise de Público</h3>
+        <span class="badge text-xs" style="background:rgba(139,92,246,0.15);color:#a78bfa;border:1px solid rgba(139,92,246,0.3);">Meta Breakdowns</span>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <!-- Metrics picker button -->
+        <div class="relative">
+          <button @click="demoPickerOpen=!demoPickerOpen"
+            :class="demoPickerOpen ? 'bg-violet-600/30 text-violet-300 border-violet-500/40' : 'text-slate-400 border-slate-700/50 hover:text-violet-300 hover:border-violet-500/30'"
+            class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-all flex items-center gap-1.5">
+            <i class="fas fa-sliders text-xs"></i>
+            Métricas
+            <span class="ml-0.5 px-1.5 py-0.5 rounded-md text-xs font-bold" style="background:rgba(139,92,246,0.25);color:#c4b5fd;" x-text="demoCols.length"></span>
+          </button>
+
+          <!-- Picker dropdown panel -->
+          <div x-show="demoPickerOpen" @click.outside="demoPickerOpen=false"
+               x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+               class="absolute right-0 top-full mt-1 z-50 rounded-xl shadow-2xl overflow-hidden"
+               style="display:none;width:360px;background:rgba(15,23,42,0.98);border:1px solid rgba(139,92,246,0.25);backdrop-filter:blur(20px);">
+            <div class="px-4 py-3 flex items-center justify-between" style="border-bottom:1px solid rgba(51,65,85,0.4);">
+              <p class="text-white font-semibold text-sm">Selecionar Métricas</p>
+              <div class="flex items-center gap-2">
+                <button @click="demoCols=['impressions','clicks','ctr','conversions','cpa','roas','revenue']" class="text-xs text-slate-500 hover:text-violet-400 transition-colors">Padrão</button>
+                <button @click="demoCols=[]" class="text-xs text-slate-500 hover:text-red-400 transition-colors">Limpar</button>
+              </div>
+            </div>
+            <div class="p-3 space-y-3 overflow-y-auto" style="max-height:420px;">
+
+              <!-- Group: Alcance -->
+              <div>
+                <p class="text-slate-600 text-xs font-semibold uppercase tracking-wider mb-1.5 px-1">Alcance</p>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <template x-for="m in [{key:'impressions',label:'Impressões'},{key:'reach',label:'Alcance'},{key:'clicks',label:'Cliques'},{key:'link_clicks',label:'Cliques no Link'}]" :key="m.key">
+                    <button @click="toggleDemoCol(m.key)"
+                      :class="demoCols.includes(m.key) ? 'border-violet-500/50 bg-violet-500/10 text-violet-300' : 'border-slate-700/40 text-slate-500 hover:border-slate-600 hover:text-slate-300'"
+                      class="flex items-center gap-2 px-3 py-2 rounded-lg border transition-all text-xs text-left">
+                      <i class="fas text-xs transition-colors" :class="demoCols.includes(m.key) ? 'fa-check-square text-violet-400' : 'fa-square'"></i>
+                      <span x-text="m.label"></span>
+                    </button>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Group: Taxas -->
+              <div>
+                <p class="text-slate-600 text-xs font-semibold uppercase tracking-wider mb-1.5 px-1">Taxas</p>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <template x-for="m in [{key:'ctr',label:'CTR'},{key:'cpc_link',label:'CPC Link'},{key:'lp_view_rate',label:'Taxa LP View'},{key:'connect_rate',label:'Connect Rate'}]" :key="m.key">
+                    <button @click="toggleDemoCol(m.key)"
+                      :class="demoCols.includes(m.key) ? 'border-violet-500/50 bg-violet-500/10 text-violet-300' : 'border-slate-700/40 text-slate-500 hover:border-slate-600 hover:text-slate-300'"
+                      class="flex items-center gap-2 px-3 py-2 rounded-lg border transition-all text-xs text-left">
+                      <i class="fas text-xs" :class="demoCols.includes(m.key) ? 'fa-check-square text-violet-400' : 'fa-square'"></i>
+                      <span x-text="m.label"></span>
+                    </button>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Group: Funil -->
+              <div>
+                <p class="text-slate-600 text-xs font-semibold uppercase tracking-wider mb-1.5 px-1">Funil</p>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <template x-for="m in [{key:'lpv',label:'Visitas LP'},{key:'checkouts',label:'Checkouts'},{key:'conversions',label:'Conversões'},{key:'checkout_per_lpv',label:'Checkout/LPV'},{key:'purchase_per_ic',label:'Compra/Clique'}]" :key="m.key">
+                    <button @click="toggleDemoCol(m.key)"
+                      :class="demoCols.includes(m.key) ? 'border-violet-500/50 bg-violet-500/10 text-violet-300' : 'border-slate-700/40 text-slate-500 hover:border-slate-600 hover:text-slate-300'"
+                      class="flex items-center gap-2 px-3 py-2 rounded-lg border transition-all text-xs text-left">
+                      <i class="fas text-xs" :class="demoCols.includes(m.key) ? 'fa-check-square text-violet-400' : 'fa-square'"></i>
+                      <span x-text="m.label"></span>
+                    </button>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Group: Financeiro -->
+              <div>
+                <p class="text-slate-600 text-xs font-semibold uppercase tracking-wider mb-1.5 px-1">Financeiro</p>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <template x-for="m in [{key:'revenue',label:'Receita'},{key:'roas',label:'ROAS'},{key:'cpa',label:'CPA'},{key:'cost_per_checkout',label:'Custo/Checkout'},{key:'cost_per_lp',label:'Custo/LP View'}]" :key="m.key">
+                    <button @click="toggleDemoCol(m.key)"
+                      :class="demoCols.includes(m.key) ? 'border-violet-500/50 bg-violet-500/10 text-violet-300' : 'border-slate-700/40 text-slate-500 hover:border-slate-600 hover:text-slate-300'"
+                      class="flex items-center gap-2 px-3 py-2 rounded-lg border transition-all text-xs text-left">
+                      <i class="fas text-xs" :class="demoCols.includes(m.key) ? 'fa-check-square text-violet-400' : 'fa-square'"></i>
+                      <span x-text="m.label"></span>
+                    </button>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Group: Vídeo -->
+              <div>
+                <p class="text-slate-600 text-xs font-semibold uppercase tracking-wider mb-1.5 px-1">Vídeo</p>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <template x-for="m in [{key:'video_3s',label:'Vídeo 3s'},{key:'video_thru',label:'ThruPlay'}]" :key="m.key">
+                    <button @click="toggleDemoCol(m.key)"
+                      :class="demoCols.includes(m.key) ? 'border-violet-500/50 bg-violet-500/10 text-violet-300' : 'border-slate-700/40 text-slate-500 hover:border-slate-600 hover:text-slate-300'"
+                      class="flex items-center gap-2 px-3 py-2 rounded-lg border transition-all text-xs text-left">
+                      <i class="fas text-xs" :class="demoCols.includes(m.key) ? 'fa-check-square text-violet-400' : 'fa-square'"></i>
+                      <span x-text="m.label"></span>
+                    </button>
+                  </template>
+                </div>
+              </div>
+
+            </div>
+            <div class="px-4 py-2.5 flex items-center justify-between" style="border-top:1px solid rgba(51,65,85,0.4);">
+              <p class="text-slate-600 text-xs" x-text="demoCols.length + ' métrica(s) ativa(s)'"></p>
+              <button @click="demoPickerOpen=false" class="btn btn-primary btn-xs">Aplicar</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab switcher -->
+        <div class="flex items-center gap-1 p-1 rounded-lg" style="background:rgba(15,23,42,0.6);">
+          <button @click="demoView='gender'"
+            :class="demoView==='gender' ? 'bg-violet-600/40 text-violet-300 border-violet-500/40' : 'text-slate-500 border-transparent hover:text-slate-300'"
+            class="px-3 py-1 rounded-md text-xs font-medium border transition-all flex items-center gap-1.5">
+            <i class="fas fa-venus-mars text-xs"></i> Gênero
+          </button>
+          <button @click="demoView='age'"
+            :class="demoView==='age' ? 'bg-violet-600/40 text-violet-300 border-violet-500/40' : 'text-slate-500 border-transparent hover:text-slate-300'"
+            class="px-3 py-1 rounded-md text-xs font-medium border transition-all flex items-center gap-1.5">
+            <i class="fas fa-chart-bar text-xs"></i> Faixa Etária
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading state -->
+    <div x-show="demographicsLoading" class="px-5 py-8 flex items-center justify-center gap-2 text-slate-500 text-sm">
+      <i class="fas fa-circle-notch fa-spin text-violet-400"></i> Carregando dados de público...
+    </div>
+
+    <!-- No data -->
+    <div x-show="!demographicsLoading && demographics && demographics.by_gender.length === 0" class="px-5 py-8 text-center text-slate-500 text-sm">
+      <i class="fas fa-users-slash text-slate-600 text-2xl mb-2 block"></i>
+      Nenhum dado de público disponível para o período selecionado.
+    </div>
+
+    <!-- ── Gender view ── -->
+    <div x-show="!demographicsLoading && demographics && demoView==='gender' && demographics.by_gender.length > 0" class="p-5">
+      <template x-if="demographics && demographics.by_gender.length > 0">
+        <div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <template x-for="row in demographics.by_gender" :key="row.gender">
+              <div class="rounded-xl p-4" style="background:rgba(139,92,246,0.06);border:1px solid rgba(139,92,246,0.15);">
+                <!-- Card header -->
+                <div class="flex items-center gap-2 mb-3">
+                  <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                       :style="row.gender==='male' ? 'background:rgba(59,130,246,0.2)' : row.gender==='female' ? 'background:rgba(236,72,153,0.2)' : 'background:rgba(100,116,139,0.2)'">
+                    <i class="fas text-sm" :class="row.gender==='male' ? 'fa-mars text-blue-400' : row.gender==='female' ? 'fa-venus text-pink-400' : 'fa-genderless text-slate-400'"></i>
+                  </div>
+                  <div>
+                    <p class="text-white font-semibold text-sm" x-text="row.gender_label"></p>
+                    <p class="text-slate-500 text-xs" x-text="fmtMoney(row.spend) + ' gasto'"></p>
+                  </div>
+                </div>
+                <!-- Spend bar -->
+                <div class="mb-3">
+                  <div class="h-1.5 rounded-full" style="background:rgba(51,65,85,0.5);">
+                    <div class="h-full rounded-full transition-all"
+                         :style="'width:' + (demographics.by_gender[0].spend > 0 ? Math.round(row.spend / demographics.by_gender[0].spend * 100) : 0) + '%;background:' + (row.gender==='male' ? 'rgba(59,130,246,0.7)' : row.gender==='female' ? 'rgba(236,72,153,0.7)' : 'rgba(100,116,139,0.5)')"></div>
+                  </div>
+                </div>
+                <!-- Dynamic metric grid — only selected cols -->
+                <div x-show="demoCols.length > 0" class="grid grid-cols-2 gap-1.5">
+                  <div x-show="demoCols.includes('impressions')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="text-slate-300 font-semibold text-sm" x-text="fmtBig(row.impressions)"></p><p class="text-slate-500 text-xs">Impressões</p></div>
+                  <div x-show="demoCols.includes('reach')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="text-slate-300 font-semibold text-sm" x-text="fmtBig(row.reach)"></p><p class="text-slate-500 text-xs">Alcance</p></div>
+                  <div x-show="demoCols.includes('clicks')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="text-slate-300 font-semibold text-sm" x-text="fmtBig(row.clicks)"></p><p class="text-slate-500 text-xs">Cliques</p></div>
+                  <div x-show="demoCols.includes('link_clicks')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="text-slate-300 font-semibold text-sm" x-text="fmtBig(row.link_clicks)"></p><p class="text-slate-500 text-xs">Cliques Link</p></div>
+                  <div x-show="demoCols.includes('ctr')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="text-slate-300 font-semibold text-sm" x-text="fmt(row.ctr,2)+'%'"></p><p class="text-slate-500 text-xs">CTR</p></div>
+                  <div x-show="demoCols.includes('cpc_link')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="text-slate-300 font-semibold text-sm" x-text="(row.cpc_link||0)>0?fmtMoney(row.cpc_link):'—'"></p><p class="text-slate-500 text-xs">CPC Link</p></div>
+                  <div x-show="demoCols.includes('lp_view_rate')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="text-slate-300 font-semibold text-sm" x-text="fmt(row.lp_view_rate,2)+'%'"></p><p class="text-slate-500 text-xs">Taxa LP View</p></div>
+                  <div x-show="demoCols.includes('connect_rate')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="text-slate-300 font-semibold text-sm" x-text="fmt(row.connect_rate,2)+'%'"></p><p class="text-slate-500 text-xs">Connect Rate</p></div>
+                  <div x-show="demoCols.includes('lpv')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="text-slate-300 font-semibold text-sm" x-text="fmtBig(row.lpv)"></p><p class="text-slate-500 text-xs">Visitas LP</p></div>
+                  <div x-show="demoCols.includes('checkouts')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="text-slate-300 font-semibold text-sm" x-text="row.checkouts||0"></p><p class="text-slate-500 text-xs">Checkouts</p></div>
+                  <div x-show="demoCols.includes('conversions')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="text-green-400 font-semibold text-sm" x-text="row.conversions||0"></p><p class="text-slate-500 text-xs">Conversões</p></div>
+                  <div x-show="demoCols.includes('checkout_per_lpv')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="text-slate-300 font-semibold text-sm" x-text="fmt(row.checkout_per_lpv,2)+'%'"></p><p class="text-slate-500 text-xs">Checkout/LPV</p></div>
+                  <div x-show="demoCols.includes('purchase_per_ic')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="text-slate-300 font-semibold text-sm" x-text="fmt(row.purchase_per_ic,2)+'%'"></p><p class="text-slate-500 text-xs">Compra/Clique</p></div>
+                  <div x-show="demoCols.includes('revenue')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="text-emerald-400 font-semibold text-sm" x-text="(row.revenue||0)>0?fmtMoney(row.revenue):'—'"></p><p class="text-slate-500 text-xs">Receita</p></div>
+                  <div x-show="demoCols.includes('roas')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="font-semibold text-sm" :style="'color:'+roasColor(row.roas||0)" x-text="(row.roas||0)>0?fmt(row.roas,2)+'x':'—'"></p><p class="text-slate-500 text-xs">ROAS</p></div>
+                  <div x-show="demoCols.includes('cpa')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="text-amber-400 font-semibold text-sm" x-text="(row.cpa||0)>0?fmtMoney(row.cpa):'—'"></p><p class="text-slate-500 text-xs">CPA</p></div>
+                  <div x-show="demoCols.includes('cost_per_checkout')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="text-amber-400 font-semibold text-sm" x-text="(row.cost_per_checkout||0)>0?fmtMoney(row.cost_per_checkout):'—'"></p><p class="text-slate-500 text-xs">Custo/Checkout</p></div>
+                  <div x-show="demoCols.includes('cost_per_lp')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="text-amber-400 font-semibold text-sm" x-text="(row.cost_per_lp||0)>0?fmtMoney(row.cost_per_lp):'—'"></p><p class="text-slate-500 text-xs">Custo/LP View</p></div>
+                  <div x-show="demoCols.includes('video_3s')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="text-slate-300 font-semibold text-sm" x-text="fmtBig(row.video_3s)"></p><p class="text-slate-500 text-xs">Vídeo 3s</p></div>
+                  <div x-show="demoCols.includes('video_thru')" class="text-center p-1.5 rounded-lg" style="background:rgba(15,23,42,0.4);"><p class="text-slate-300 font-semibold text-sm" x-text="fmtBig(row.video_thru)"></p><p class="text-slate-500 text-xs">ThruPlay</p></div>
+                </div>
+                <p x-show="demoCols.length === 0" class="text-slate-600 text-xs text-center py-2">Nenhuma métrica selecionada</p>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- ── Age view ── -->
+    <div x-show="!demographicsLoading && demographics && demoView==='age' && demographics.by_age.length > 0" class="overflow-x-auto">
+      <template x-if="demographics && demographics.by_age.length > 0">
+        <table class="w-full text-xs">
+          <thead>
+            <tr style="background:rgba(15,23,42,0.4);border-bottom:1px solid rgba(51,65,85,0.4);">
+              <th class="text-left px-5 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">Faixa</th>
+              <th class="text-left px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap" style="min-width:160px">Gasto / Share</th>
+              <th x-show="demoCols.includes('impressions')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">Impressões</th>
+              <th x-show="demoCols.includes('reach')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">Alcance</th>
+              <th x-show="demoCols.includes('clicks')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">Cliques</th>
+              <th x-show="demoCols.includes('link_clicks')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">Cliques Link</th>
+              <th x-show="demoCols.includes('ctr')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">CTR</th>
+              <th x-show="demoCols.includes('cpc_link')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">CPC Link</th>
+              <th x-show="demoCols.includes('lp_view_rate')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">Taxa LP</th>
+              <th x-show="demoCols.includes('connect_rate')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">Connect Rate</th>
+              <th x-show="demoCols.includes('lpv')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">Visitas LP</th>
+              <th x-show="demoCols.includes('checkouts')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">Checkouts</th>
+              <th x-show="demoCols.includes('conversions')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">Conv.</th>
+              <th x-show="demoCols.includes('checkout_per_lpv')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">Checkout/LPV</th>
+              <th x-show="demoCols.includes('purchase_per_ic')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">Compra/Clique</th>
+              <th x-show="demoCols.includes('revenue')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">Receita</th>
+              <th x-show="demoCols.includes('roas')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">ROAS</th>
+              <th x-show="demoCols.includes('cpa')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">CPA</th>
+              <th x-show="demoCols.includes('cost_per_checkout')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">Custo/Checkout</th>
+              <th x-show="demoCols.includes('cost_per_lp')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">Custo/LP View</th>
+              <th x-show="demoCols.includes('video_3s')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">Vídeo 3s</th>
+              <th x-show="demoCols.includes('video_thru')" class="text-right px-3 py-2.5 text-slate-500 font-semibold uppercase tracking-wider whitespace-nowrap">ThruPlay</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="row in demographics.by_age" :key="row.age">
+              <tr class="hover:bg-violet-500/5 transition-colors" style="border-bottom:1px solid rgba(51,65,85,0.12);">
+                <td class="px-5 py-3 whitespace-nowrap">
+                  <span class="inline-flex items-center justify-center px-2 py-0.5 rounded-md text-xs font-bold" style="background:rgba(139,92,246,0.15);color:#c4b5fd;border:1px solid rgba(139,92,246,0.25);" x-text="row.age"></span>
+                </td>
+                <td class="px-3 py-3" style="min-width:160px">
+                  <div class="flex items-center gap-2">
+                    <span class="text-violet-300 font-semibold whitespace-nowrap" x-text="fmtMoney(row.spend)"></span>
+                    <div class="flex-1 h-1.5 rounded-full" style="background:rgba(51,65,85,0.4);">
+                      <div class="h-full rounded-full" style="background:rgba(139,92,246,0.55);transition:width 0.4s;"
+                           :style="'width:' + (demographics.by_age.reduce((mx,r)=>Math.max(mx,r.spend),0) > 0 ? Math.round(row.spend / demographics.by_age.reduce((mx,r)=>Math.max(mx,r.spend),0) * 100) : 0) + '%'"></div>
+                    </div>
+                  </div>
+                </td>
+                <td x-show="demoCols.includes('impressions')" class="px-3 py-3 text-right text-slate-400 whitespace-nowrap" x-text="fmtBig(row.impressions)"></td>
+                <td x-show="demoCols.includes('reach')" class="px-3 py-3 text-right text-slate-400 whitespace-nowrap" x-text="fmtBig(row.reach)"></td>
+                <td x-show="demoCols.includes('clicks')" class="px-3 py-3 text-right text-slate-400 whitespace-nowrap" x-text="fmtBig(row.clicks)"></td>
+                <td x-show="demoCols.includes('link_clicks')" class="px-3 py-3 text-right text-slate-400 whitespace-nowrap" x-text="fmtBig(row.link_clicks)"></td>
+                <td x-show="demoCols.includes('ctr')" class="px-3 py-3 text-right text-slate-400 whitespace-nowrap" x-text="fmt(row.ctr,2)+'%'"></td>
+                <td x-show="demoCols.includes('cpc_link')" class="px-3 py-3 text-right text-slate-400 whitespace-nowrap" x-text="(row.cpc_link||0)>0?fmtMoney(row.cpc_link):'—'"></td>
+                <td x-show="demoCols.includes('lp_view_rate')" class="px-3 py-3 text-right text-slate-400 whitespace-nowrap" x-text="fmt(row.lp_view_rate,2)+'%'"></td>
+                <td x-show="demoCols.includes('connect_rate')" class="px-3 py-3 text-right text-slate-400 whitespace-nowrap" x-text="fmt(row.connect_rate,2)+'%'"></td>
+                <td x-show="demoCols.includes('lpv')" class="px-3 py-3 text-right text-slate-400 whitespace-nowrap" x-text="fmtBig(row.lpv)"></td>
+                <td x-show="demoCols.includes('checkouts')" class="px-3 py-3 text-right text-slate-400 whitespace-nowrap" x-text="row.checkouts||0"></td>
+                <td x-show="demoCols.includes('conversions')" class="px-3 py-3 text-right font-semibold text-green-400 whitespace-nowrap" x-text="row.conversions||0"></td>
+                <td x-show="demoCols.includes('checkout_per_lpv')" class="px-3 py-3 text-right text-slate-400 whitespace-nowrap" x-text="fmt(row.checkout_per_lpv,2)+'%'"></td>
+                <td x-show="demoCols.includes('purchase_per_ic')" class="px-3 py-3 text-right text-slate-400 whitespace-nowrap" x-text="fmt(row.purchase_per_ic,2)+'%'"></td>
+                <td x-show="demoCols.includes('revenue')" class="px-3 py-3 text-right font-semibold text-emerald-400 whitespace-nowrap" x-text="(row.revenue||0)>0?fmtMoney(row.revenue):'—'"></td>
+                <td x-show="demoCols.includes('roas')" class="px-3 py-3 text-right font-semibold whitespace-nowrap" :style="'color:'+roasColor(row.roas||0)" x-text="(row.roas||0)>0?fmt(row.roas,2)+'x':'—'"></td>
+                <td x-show="demoCols.includes('cpa')" class="px-3 py-3 text-right text-amber-400 whitespace-nowrap" x-text="(row.cpa||0)>0?fmtMoney(row.cpa):'—'"></td>
+                <td x-show="demoCols.includes('cost_per_checkout')" class="px-3 py-3 text-right text-amber-400 whitespace-nowrap" x-text="(row.cost_per_checkout||0)>0?fmtMoney(row.cost_per_checkout):'—'"></td>
+                <td x-show="demoCols.includes('cost_per_lp')" class="px-3 py-3 text-right text-amber-400 whitespace-nowrap" x-text="(row.cost_per_lp||0)>0?fmtMoney(row.cost_per_lp):'—'"></td>
+                <td x-show="demoCols.includes('video_3s')" class="px-3 py-3 text-right text-slate-400 whitespace-nowrap" x-text="fmtBig(row.video_3s)"></td>
+                <td x-show="demoCols.includes('video_thru')" class="px-3 py-3 text-right text-slate-400 whitespace-nowrap" x-text="fmtBig(row.video_thru)"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </template>
+    </div>
   </div>
 
   <!-- Empty campaigns -->
