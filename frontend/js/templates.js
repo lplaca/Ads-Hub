@@ -122,6 +122,7 @@ Alpine.data('AccountsPage', function() {
     metricsMap: {},
     metricsLoading: false,
     metricsPeriod: 'last_7d',
+    customFrom: '', customTo: '', showCustom: false,
     search: '', filterBm: '', filterStatus: '',
     showModal: false, showHelpAcc: false, testing: false, testResult: null, showToken: false,
     saving: false,
@@ -142,7 +143,11 @@ Alpine.data('AccountsPage', function() {
 
     async loadMetrics() {
       this.metricsLoading = true;
-      const data = await API.get(`/api/accounts/with-metrics?period=${this.metricsPeriod}`);
+      let url = `/api/accounts/with-metrics?period=${this.metricsPeriod}`;
+      if (this.metricsPeriod === 'custom' && this.customFrom && this.customTo) {
+        url = `/api/accounts/with-metrics?period=custom&date_from=${this.customFrom}&date_to=${this.customTo}`;
+      }
+      const data = await API.get(url);
       if (data) {
         const map = {};
         data.forEach(a => { map[a.id] = a; });
@@ -153,8 +158,15 @@ Alpine.data('AccountsPage', function() {
 
     async setMetricsPeriod(p) {
       this.metricsPeriod = p;
+      this.showCustom = p === 'custom';
+      if (p !== 'custom') { this.metricsMap = {}; await this.loadMetrics(); }
+    },
+
+    async applyCustom() {
+      if (!this.customFrom || !this.customTo) { toast('warning', 'Selecione as datas'); return; }
       this.metricsMap = {};
       await this.loadMetrics();
+      this.showCustom = false;
     },
 
     m(accId) { return this.metricsMap[accId] || {}; },
@@ -232,7 +244,7 @@ Alpine.data('AccountsPage', function() {
 // ── ProductsPage renderPage ───────────────────────────────────────────────
 Alpine.data('ProductsPage', function() {
   return {
-    period: '7',
+    period: 'last_7d',
     selected: null,
     chart: null,
     products: [],
@@ -526,6 +538,13 @@ Alpine.data('AlertsPage', function() {
       toast('info','Alerta ignorado.');
     },
 
+    async sendAlertEmail() {
+      const activeIds = this.filtered.filter(a => a.status === 'active').map(a => a.id);
+      const r = await API.post('/api/alerts/send-email', { alert_ids: activeIds });
+      if (r && r.ok) toast('success', 'Email de alertas enviado!');
+      else toast('error', 'Erro ao enviar email: ' + (r?.error || 'configure SMTP em Configurações'));
+    },
+
     async pauseAll() {
       const toProcess = [...this.filtered];
       for (const a of toProcess) {
@@ -614,9 +633,10 @@ Alpine.data('QuickActionsPage', function() {
 
 // ── ReportsPage renderPage ────────────────────────────────────────────────
 Alpine.data('ReportsPage', function() {
+  const _PERIOD_DAYS = {today:1,yesterday:1,last_7d:7,last_14d:14,last_30d:30,last_90d:90};
   return {
     reportType: 'account',
-    period: '7',
+    period: 'last_7d',
     customFrom: '', customTo: '',
     showCustom: false,
     metrics: {invest:true, conversions:true, cpa:true, roas:true, ctr:true, impressions:false, clicks:false},
@@ -632,7 +652,8 @@ Alpine.data('ReportsPage', function() {
 
     async generatePreview() {
       this.generating = true;
-      const result = await API.post('/api/reports/generate', {days: parseInt(this.period)||7});
+      const days = this.period === 'custom' ? 30 : (_PERIOD_DAYS[this.period] || 7);
+      const result = await API.post('/api/reports/generate', {days});
       this.reportData = result && result.data ? result.data : null;
       this.generating = false; this.showPreview = true;
       this.$nextTick(() => this.buildChart());
@@ -716,6 +737,13 @@ Alpine.data('SettingsPage', function() {
     async testInteg(name) {
       await new Promise(r => setTimeout(r,900));
       toast('success', name+' testado com sucesso!');
+    },
+
+    async testEmail() {
+      await this.save();
+      const r = await API.post('/api/alerts/test-email', { to: this.cfg.emailAddr });
+      if (r && r.ok) toast('success', 'Email de teste enviado!');
+      else toast('error', 'Erro: ' + (r?.error || 'verifique as configurações SMTP'));
     },
 
     async backup() {
@@ -1022,10 +1050,16 @@ accounts(s) {
     <!-- Period selector pills -->
     <div class="flex items-center gap-1.5 flex-wrap">
       <span class="text-slate-500 text-xs mr-1">Período:</span>
-      ${[
-        {v:'today',l:'Hoje'},{v:'yesterday',l:'Ontem'},{v:'last_7d',l:'7 dias'},
-        {v:'last_14d',l:'14 dias'},{v:'last_30d',l:'30 dias'},{v:'last_90d',l:'Máximo'},
-      ].map(p=>`<button @click="setMetricsPeriod('${p.v}')" :class="metricsPeriod==='${p.v}'?'bg-blue-600/30 text-blue-300 border-blue-500/50':'text-slate-400 border-slate-700/50 hover:text-slate-300'" class="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all">${p.l}</button>`).join('')}
+      ${[{v:'today',l:'Hoje'},{v:'yesterday',l:'Ontem'},{v:'last_7d',l:'7 dias'},{v:'last_14d',l:'14 dias'},{v:'last_30d',l:'30 dias'},{v:'last_90d',l:'Máximo'},{v:'custom',l:'Personalizado'}].map(p=>`<button @click="setMetricsPeriod('${p.v}')" :class="metricsPeriod==='${p.v}'?'bg-blue-600/30 text-blue-300 border-blue-500/50':'text-slate-400 border-slate-700/50 hover:text-slate-300'" class="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all">${p.l}</button>`).join('')}
+      <span x-show="metricsLoading" class="ml-1 text-xs text-slate-500"><i class="fas fa-circle-notch fa-spin"></i></span>
+    </div>
+    <div x-show="showCustom" x-transition class="flex items-center gap-2 flex-wrap glass rounded-xl p-3">
+      <label class="text-slate-400 text-xs">De:</label>
+      <input type="date" x-model="customFrom" class="form-input py-1.5 text-sm" style="width:auto;" />
+      <label class="text-slate-400 text-xs">Até:</label>
+      <input type="date" x-model="customTo" class="form-input py-1.5 text-sm" style="width:auto;" />
+      <button @click="applyCustom()" class="btn btn-primary btn-sm">Aplicar</button>
+      <button @click="showCustom=false; metricsPeriod='last_7d'" class="btn btn-ghost btn-sm">Cancelar</button>
     </div>
 
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 fade-in-children">
@@ -1281,13 +1315,10 @@ products(s) {
 
   return `
   <div class="fade-in space-y-5">
-    <div class="flex flex-wrap items-center gap-3">
-      <select x-model="period" class="form-select" style="width:auto;">
-        <option value="7">Últimos 7 dias</option>
-        <option value="14">Últimos 14 dias</option>
-        <option value="30">Últimos 30 dias</option>
-      </select>
-      <button @click="init(); $dispatch('show-toast',{type:'success',message:'Dados atualizados!'})" class="btn btn-secondary btn-sm">
+    <div class="flex flex-wrap items-center gap-2">
+      ${[{v:'today',l:'Hoje'},{v:'yesterday',l:'Ontem'},{v:'last_7d',l:'7 dias'},{v:'last_14d',l:'14 dias'},{v:'last_30d',l:'30 dias'},{v:'last_90d',l:'Máximo'}].map(p=>`
+      <button @click="period='${p.v}'" :class="period==='${p.v}'?'bg-blue-600/30 text-blue-300 border-blue-500/50':'text-slate-400 border-slate-700/50 hover:text-slate-300'" class="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all">${p.l}</button>`).join('')}
+      <button @click="init(); $dispatch('show-toast',{type:'success',message:'Dados atualizados!'})" class="btn btn-secondary btn-sm ml-auto">
         <i class="fas fa-rotate-right"></i> Atualizar
       </button>
     </div>
@@ -1713,7 +1744,10 @@ alerts(s) {
           <i class="fas fa-circle-info text-xs text-blue-400"></i> Info
         </button>
       </div>
-      <div class="ml-auto flex gap-2">
+      <div class="ml-auto flex gap-2 flex-wrap">
+        <button @click="sendAlertEmail()" class="btn btn-secondary btn-sm" :disabled="filtered.length===0" title="Enviar alertas por email">
+          <i class="fas fa-envelope text-xs"></i> Email
+        </button>
         <button @click="pauseAll()" class="btn btn-danger btn-sm" :disabled="filtered.length===0">
           <i class="fas fa-pause text-xs"></i> Pausar Todas
         </button>
@@ -1888,12 +1922,10 @@ reports(s) {
 
           <div>
             <label class="form-label">Período</label>
-            <select x-model="period" @change="showCustom=$event.target.value==='custom'" class="form-select">
-              <option value="7">Últimos 7 dias</option>
-              <option value="14">Últimos 14 dias</option>
-              <option value="30">Últimos 30 dias</option>
-              <option value="custom">Personalizado</option>
-            </select>
+            <div class="flex flex-wrap gap-1.5 mt-1">
+              ${[{v:'today',l:'Hoje'},{v:'yesterday',l:'Ontem'},{v:'last_7d',l:'7 dias'},{v:'last_14d',l:'14 dias'},{v:'last_30d',l:'30 dias'},{v:'last_90d',l:'Máximo'},{v:'custom',l:'Personalizado'}].map(p=>`
+              <button @click="period='${p.v}'; showCustom='${p.v}'==='custom'" :class="period==='${p.v}'?'bg-blue-600/30 text-blue-300 border-blue-500/50':'text-slate-400 border-slate-700/50 hover:text-slate-300'" class="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all">${p.l}</button>`).join('')}
+            </div>
             <div x-show="showCustom" x-transition class="mt-2 space-y-2">
               <input type="date" x-model="customFrom" class="form-input" />
               <input type="date" x-model="customTo" class="form-input" />
@@ -2163,16 +2195,104 @@ settings(s) {
             </div>
           </div>
 
+          <!-- Web Intelligence Search APIs -->
+          <div class="glass rounded-2xl p-5 space-y-4" style="border:1px solid rgba(6,182,212,0.2);">
+            <h3 class="text-white font-semibold border-b pb-3 flex items-center gap-2" style="border-color:rgba(51,65,85,0.4);">
+              <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background:rgba(6,182,212,0.15);">
+                <i class="fas fa-globe text-cyan-400 text-xs"></i>
+              </div>
+              Inteligência de Mercado (Busca Web)
+            </h3>
+            <p class="text-slate-400 text-xs">Necessário para pesquisas de mercado, estratégias e tendências de Reddit, YouTube, X e blogs.</p>
+            <div>
+              <label class="form-label"><i class="fas fa-magnifying-glass text-cyan-400 mr-1"></i>Serper API Key <span class="text-slate-500 font-normal">(Google Search)</span></label>
+              <input type="password" x-model="cfg.serper_api_key" placeholder="Chave da API Serper..." class="form-input" />
+              <p class="text-slate-500 text-xs mt-1">Grátis: 2500 buscas/mês em <span class="text-cyan-400">serper.dev</span></p>
+            </div>
+            <div>
+              <label class="form-label"><i class="fas fa-shield text-cyan-400 mr-1"></i>Brave Search API Key <span class="text-slate-500 font-normal">(alternativo)</span></label>
+              <input type="password" x-model="cfg.brave_api_key" placeholder="BSA..." class="form-input" />
+              <p class="text-slate-500 text-xs mt-1">Alternativa ao Serper em <span class="text-cyan-400">api.search.brave.com</span></p>
+            </div>
+          </div>
+
+          <!-- ClickUp -->
+          <div class="glass rounded-2xl p-5 space-y-4" style="border:1px solid rgba(59,130,246,0.2);">
+            <h3 class="text-white font-semibold border-b pb-3 flex items-center gap-2" style="border-color:rgba(51,65,85,0.4);">
+              <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background:rgba(59,130,246,0.15);">
+                <i class="fas fa-check-square text-blue-400 text-xs"></i>
+              </div>
+              ClickUp
+            </h3>
+            <div>
+              <label class="form-label"><i class="fas fa-key text-blue-400 mr-1"></i>API Key do ClickUp</label>
+              <input type="password" x-model="cfg.clickup_api_key" placeholder="pk_..." class="form-input" />
+              <p class="text-slate-500 text-xs mt-1">Obtenha em: Configurações → Apps → API Token</p>
+            </div>
+            <div>
+              <label class="form-label"><i class="fas fa-list text-blue-400 mr-1"></i>ID da Lista (clickup_list_id)</label>
+              <input type="text" x-model="cfg.clickup_list_id" placeholder="901322010985" class="form-input" />
+              <p class="text-slate-500 text-xs mt-1">URL da lista: app.clickup.com/TEAM/v/li/<strong>ID_AQUI</strong></p>
+            </div>
+          </div>
+
+          <!-- Notion -->
+          <div class="glass rounded-2xl p-5 space-y-4" style="border:1px solid rgba(139,92,246,0.2);">
+            <h3 class="text-white font-semibold border-b pb-3 flex items-center gap-2" style="border-color:rgba(51,65,85,0.4);">
+              <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background:rgba(139,92,246,0.15);">
+                <i class="fas fa-n text-purple-400 text-xs font-bold"></i>
+              </div>
+              Notion
+            </h3>
+            <div>
+              <label class="form-label"><i class="fas fa-key text-purple-400 mr-1"></i>Token de Integração Notion</label>
+              <input type="password" x-model="cfg.notion_token" placeholder="secret_..." class="form-input" />
+              <p class="text-slate-500 text-xs mt-1">Crie uma integração em: notion.so/my-integrations</p>
+            </div>
+            <div>
+              <label class="form-label"><i class="fas fa-database text-purple-400 mr-1"></i>ID do DB — Análises Diárias</label>
+              <input type="text" x-model="cfg.notion_db_id" placeholder="2bef5bb421844beaac57ccec4f744822" class="form-input" />
+              <p class="text-slate-500 text-xs mt-1">ID da database onde serão criadas as análises</p>
+            </div>
+            <div>
+              <label class="form-label"><i class="fas fa-box text-purple-400 mr-1"></i>ID do DB — Produtos</label>
+              <input type="text" x-model="cfg.notion_products_db_id" placeholder="91fc0fc4501149c59dfe21a10b8cf434" class="form-input" />
+              <p class="text-slate-500 text-xs mt-1">ID da database de produtos (para lista de seleção)</p>
+            </div>
+          </div>
+
           <!-- Other integrations -->
           <div class="glass rounded-2xl p-5 space-y-4">
             <h3 class="text-white font-semibold border-b pb-3" style="border-color:rgba(51,65,85,0.4);">Outras Integrações</h3>
             <div>
-              <label class="form-label"><i class="fas fa-envelope text-blue-400 mr-1"></i>Email para Relatórios</label>
-              <div class="flex gap-2">
-                <input type="email" x-model="cfg.emailAddr" placeholder="seu@email.com" class="form-input flex-1" />
-                <button @click="testInteg('Email')" class="btn btn-secondary btn-sm flex-shrink-0">Testar</button>
+              <label class="form-label"><i class="fas fa-envelope text-blue-400 mr-1"></i>Email para Alertas / Relatórios</label>
+              <input type="email" x-model="cfg.emailAddr" placeholder="seu@email.com" class="form-input" />
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="form-label"><i class="fas fa-server text-slate-400 mr-1"></i>SMTP Host</label>
+                <input type="text" x-model="cfg.smtp_host" placeholder="smtp.gmail.com" class="form-input" />
+              </div>
+              <div>
+                <label class="form-label"><i class="fas fa-hashtag text-slate-400 mr-1"></i>SMTP Porta</label>
+                <input type="number" x-model="cfg.smtp_port" placeholder="587" class="form-input" />
+              </div>
+              <div>
+                <label class="form-label"><i class="fas fa-user text-slate-400 mr-1"></i>SMTP Usuário</label>
+                <input type="email" x-model="cfg.smtp_user" placeholder="seu@gmail.com" class="form-input" />
+              </div>
+              <div>
+                <label class="form-label"><i class="fas fa-key text-slate-400 mr-1"></i>SMTP Senha / App Password</label>
+                <input type="password" x-model="cfg.smtp_pass" placeholder="••••••••" class="form-input" />
               </div>
             </div>
+            <div class="flex items-center gap-2 p-3 rounded-xl text-xs" style="background:rgba(59,130,246,0.05);border:1px solid rgba(59,130,246,0.15);">
+              <i class="fas fa-circle-info text-blue-400 flex-shrink-0"></i>
+              <p class="text-slate-400">Para Gmail: ative a verificação em 2 etapas e crie uma <strong class="text-blue-300">Senha de App</strong> em myaccount.google.com/apppasswords</p>
+            </div>
+            <button @click="testEmail()" class="btn btn-secondary btn-sm w-fit">
+              <i class="fas fa-paper-plane text-xs mr-1"></i> Enviar email de teste
+            </button>
             <div>
               <label class="form-label"><i class="fab fa-slack text-purple-400 mr-1"></i>Slack Webhook URL</label>
               <div class="flex gap-2">

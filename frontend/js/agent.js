@@ -11,6 +11,7 @@ document.addEventListener('alpine:init', () => {
 Alpine.data('CampaignsPage', () => ({
   campaigns: [],
   loading: false,
+  period: 'last_7d',
   search: '',
   filterStatus: 'all',
   filterHealth: 'all',
@@ -18,18 +19,45 @@ Alpine.data('CampaignsPage', () => ({
   sortDir: 'desc',
   selectedId: null,
   actionLoading: {},
+  lastUpdated: null,
+
+  // Which columns are visible (user can toggle)
+  visibleCols: ['spend','revenue','roas','cpa','impressions','reach','link_clicks',
+                'cpc_link','lpv','cost_per_lp','checkouts','cost_per_checkout',
+                'conversions','connect_rate','lp_view_rate','checkout_per_lpv','purchase_per_ic'],
+  showColMenu: false,
+
+  COL_LABELS: {
+    spend:'Gasto', revenue:'Receita', roas:'ROAS', cpa:'Custo/Compra',
+    impressions:'Impressões', reach:'Alcance',
+    link_clicks:'Cliques Link', cpc_link:'CPC Link',
+    ctr:'CTR', lpv:'Page Views', cost_per_lp:'Custo/PV',
+    checkouts:'Finalizações', cost_per_checkout:'Custo/Final.',
+    conversions:'Compras', connect_rate:'Connect Rate',
+    lp_view_rate:'LPV Rate', checkout_per_lpv:'IC/LPV', purchase_per_ic:'Compra/IC',
+    video_3s:'Views 3s', video_thru:'ThruPlay',
+  },
 
   async init() {
     await this.load();
     window.addEventListener('page-refresh', () => this.load());
+    // Live update from global poller
+    window.addEventListener('live-update', () => {
+      this.lastUpdated = new Date().toLocaleTimeString('pt-BR');
+    });
   },
 
   async load() {
     this.loading = true;
-    const data = await API.get('/api/campaigns');
-    if (data) this.campaigns = data;
+    const data = await API.get(`/api/campaigns?period=${this.period}`);
+    if (data) {
+      this.campaigns = data;
+      this.lastUpdated = new Date().toLocaleTimeString('pt-BR');
+    }
     this.loading = false;
   },
+
+  async setPeriod(p) { this.period = p; await this.load(); },
 
   health(c) {
     if (c.status === 'paused') return 'paused';
@@ -116,136 +144,194 @@ Alpine.data('CampaignsPage', () => ({
     ctx.stroke();
   },
 
+  fmtMetric(k, v) {
+    const n = Number(v || 0);
+    if (k==='spend'||k==='revenue'||k==='cpa'||k==='cpc_link'||k==='cost_per_lp'||k==='cost_per_checkout') return '$'+n.toFixed(2);
+    if (k==='roas') return n.toFixed(2)+'x';
+    if (k==='ctr'||k==='connect_rate'||k==='lp_view_rate'||k==='checkout_per_lpv'||k==='purchase_per_ic') return n.toFixed(2)+'%';
+    if (k==='impressions'||k==='reach'||k==='video_3s'||k==='video_thru') return n.toLocaleString('pt-BR');
+    return String(n);
+  },
+
+  metricColor(k, v) {
+    const n = Number(v || 0);
+    if (k==='roas') return n>=3?'color:#10b981':n>0&&n<1.5?'color:#ef4444':n>0&&n<2.5?'color:#f59e0b':'';
+    if (k==='cpa'||k==='cost_per_lp'||k==='cost_per_checkout'||k==='cpc_link') return n>0?'color:#fbbf24':'';
+    if (k==='revenue'||k==='conversions'||k==='checkouts') return n>0?'color:#34d399':'';
+    if (k==='connect_rate') return n>=20?'color:#10b981':n>0&&n<5?'color:#f59e0b':'';
+    if (k==='purchase_per_ic') return n>=30?'color:#10b981':n>0&&n<10?'color:#ef4444':'';
+    return '';
+  },
+
   renderPage() {
     const stats = {
       total: this.campaigns.length,
       active: this.campaigns.filter(c=>c.status==='active').length,
       paused: this.campaigns.filter(c=>c.status==='paused').length,
       critical: this.campaigns.filter(c=>this.health(c)==='critical').length,
+      spend: this.campaigns.reduce((s,c)=>s+(c.spend||0),0),
+      revenue: this.campaigns.reduce((s,c)=>s+(c.revenue||0),0),
+      conversions: this.campaigns.reduce((s,c)=>s+(c.conversions||0),0),
     };
-    return `
-<div class="fade-in space-y-5">
+    const avgRoas = stats.spend > 0 ? stats.revenue / stats.spend : 0;
 
-  <!-- Stats strip -->
-  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+    const allCols = Object.keys(this.COL_LABELS);
+    const vis = this.visibleCols;
+
+    return `
+<div class="fade-in space-y-4">
+
+  <!-- Totals bar -->
+  <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
     ${[
-      {label:'Total', val:stats.total, icon:'fa-layer-group', color:'#3b82f6'},
-      {label:'Ativas', val:stats.active, icon:'fa-circle-play', color:'#10b981'},
-      {label:'Pausadas', val:stats.paused, icon:'fa-circle-pause', color:'#64748b'},
-      {label:'Críticas', val:stats.critical, icon:'fa-triangle-exclamation', color:'#ef4444'},
+      {k:'total',   l:'Campanhas',  v:stats.total,              fmt:v=>v,            color:'#3b82f6'},
+      {k:'active',  l:'Ativas',     v:stats.active,             fmt:v=>v,            color:'#10b981'},
+      {k:'paused',  l:'Pausadas',   v:stats.paused,             fmt:v=>v,            color:'#64748b'},
+      {k:'critical',l:'Críticas',   v:stats.critical,           fmt:v=>v,            color:'#ef4444'},
+      {k:'spend',   l:'Gasto Total',v:stats.spend,              fmt:v=>'$'+v.toFixed(2), color:'#f59e0b'},
+      {k:'revenue', l:'Receita',    v:stats.revenue,            fmt:v=>'$'+v.toFixed(2), color:'#34d399'},
+      {k:'roas_avg',l:'ROAS Médio', v:avgRoas,                  fmt:v=>v.toFixed(2)+'x', color: avgRoas>=3?'#10b981':avgRoas>0&&avgRoas<2?'#ef4444':'#94a3b8'},
+      {k:'conv',    l:'Compras',    v:stats.conversions,        fmt:v=>v,            color:'#a78bfa'},
     ].map(s=>`
-    <div class="glass rounded-2xl p-4 flex items-center gap-3">
-      <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:${s.color}20;">
-        <i class="fas ${s.icon}" style="color:${s.color};font-size:15px;"></i>
-      </div>
-      <div><p class="text-2xl font-bold text-white font-mono">${s.val}</p><p class="text-xs text-slate-400">${s.label}</p></div>
+    <div class="rounded-xl p-3 flex flex-col" style="background:rgba(30,41,59,0.7);border:1px solid rgba(51,65,85,0.4);">
+      <p class="text-xs text-slate-500 truncate">${s.l}</p>
+      <p class="text-base font-bold font-mono mt-0.5 truncate" style="color:${s.color};">${s.fmt(s.v)}</p>
     </div>`).join('')}
   </div>
 
-  <!-- Filters -->
-  <div class="glass rounded-2xl p-4 flex flex-col sm:flex-row gap-3">
-    <div class="flex-1 relative">
-      <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm"></i>
-      <input x-model="search" type="text" placeholder="Buscar campanha..." class="w-full bg-slate-800/60 border border-slate-700/50 text-slate-200 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:border-blue-500/50 placeholder-slate-500">
+  <!-- Controls row -->
+  <div class="rounded-2xl p-3 space-y-2.5" style="background:rgba(30,41,59,0.6);border:1px solid rgba(51,65,85,0.4);">
+    <!-- Period pills -->
+    <div class="flex items-center gap-1.5 flex-wrap">
+      ${[{v:'today',l:'Hoje'},{v:'yesterday',l:'Ontem'},{v:'last_7d',l:'7 dias'},{v:'last_14d',l:'14 dias'},{v:'last_30d',l:'30 dias'},{v:'last_90d',l:'Máximo'}].map(p=>`
+      <button @click="setPeriod('${p.v}')" :class="period==='${p.v}'?'bg-blue-600/30 text-blue-300 border-blue-500/50':'text-slate-400 border-slate-700/50 hover:text-slate-300'" class="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all">${p.l}</button>`).join('')}
+      <span x-show="loading" class="ml-1 text-xs text-slate-500"><i class="fas fa-circle-notch fa-spin"></i> atualizando...</span>
+      ${this.lastUpdated ? `<span class="ml-auto text-xs text-slate-600 flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>atualizado ${this.lastUpdated}</span>` : ''}
     </div>
-    <select x-model="filterStatus" class="bg-slate-800/60 border border-slate-700/50 text-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-blue-500/50">
-      <option value="all">Todos os status</option>
-      <option value="active">Ativas</option>
-      <option value="paused">Pausadas</option>
-    </select>
-    <select x-model="filterHealth" class="bg-slate-800/60 border border-slate-700/50 text-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-blue-500/50">
-      <option value="all">Todas as saúdes</option>
-      <option value="good">Saudável</option>
-      <option value="warning">Atenção</option>
-      <option value="critical">Crítica</option>
-      <option value="paused">Pausada</option>
-    </select>
-    <select x-model="sortBy" class="bg-slate-800/60 border border-slate-700/50 text-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-blue-500/50">
-      <option value="spend">Ordenar: Gasto</option>
-      <option value="roas">Ordenar: ROAS</option>
-      <option value="cpa">Ordenar: CPA</option>
-      <option value="conversions">Ordenar: Conversões</option>
-      <option value="ctr">Ordenar: CTR</option>
-    </select>
+    <!-- Filters + columns -->
+    <div class="flex flex-wrap gap-2 items-center">
+      <div class="relative flex-1 min-w-[140px]">
+        <i class="fas fa-search absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+        <input x-model="search" type="text" placeholder="Buscar campanha ou conta..." class="w-full bg-slate-800/60 border border-slate-700/50 text-slate-200 rounded-lg pl-7 pr-3 py-1.5 text-xs focus:outline-none focus:border-blue-500/50 placeholder-slate-600">
+      </div>
+      <select x-model="filterStatus" class="bg-slate-800/60 border border-slate-700/50 text-slate-300 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none">
+        <option value="all">Status: Todos</option>
+        <option value="active">Ativas</option>
+        <option value="paused">Pausadas</option>
+      </select>
+      <select x-model="filterHealth" class="bg-slate-800/60 border border-slate-700/50 text-slate-300 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none">
+        <option value="all">Saúde: Todas</option>
+        <option value="good">Saudável</option>
+        <option value="warning">Atenção</option>
+        <option value="critical">Crítica</option>
+      </select>
+      <select x-model="sortBy" class="bg-slate-800/60 border border-slate-700/50 text-slate-300 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none">
+        <option value="spend">Ordenar: Gasto</option>
+        <option value="revenue">Receita</option>
+        <option value="roas">ROAS</option>
+        <option value="cpa">Custo/Compra</option>
+        <option value="conversions">Compras</option>
+        <option value="checkouts">Finalizações</option>
+        <option value="link_clicks">Cliques Link</option>
+        <option value="impressions">Impressões</option>
+        <option value="connect_rate">Connect Rate</option>
+        <option value="purchase_per_ic">Taxa Compra/IC</option>
+      </select>
+      <!-- Column picker toggle -->
+      <div class="relative">
+        <button @click="showColMenu=!showColMenu" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-slate-400 hover:text-white border border-slate-700/50 bg-slate-800/60 transition-all">
+          <i class="fas fa-table-columns"></i> Colunas
+        </button>
+        <div x-show="showColMenu" @click.outside="showColMenu=false"
+          class="absolute right-0 top-full mt-1 w-56 rounded-xl shadow-2xl z-50 p-2 overflow-y-auto"
+          style="background:#1e293b;border:1px solid rgba(51,65,85,0.7);max-height:280px;display:none;">
+          ${allCols.map(k=>`
+          <label class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-700/40 cursor-pointer text-xs text-slate-300">
+            <input type="checkbox" :checked="visibleCols.includes('${k}')"
+              @change="visibleCols.includes('${k}') ? visibleCols=visibleCols.filter(c=>c!=='${k}') : visibleCols.push('${k}')"
+              class="accent-blue-500 w-3.5 h-3.5">
+            ${this.COL_LABELS[k]}
+          </label>`).join('')}
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Loading -->
-  <div x-show="loading" class="flex items-center justify-center py-20">
-    <div class="w-10 h-10 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin"></div>
+  <div x-show="loading" class="flex items-center justify-center py-16">
+    <div class="w-8 h-8 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin"></div>
   </div>
 
-  <!-- Campaign list -->
-  <div x-show="!loading" class="space-y-2 fade-in-children">
-    <template x-if="filtered.length === 0">
-      <div class="glass rounded-2xl p-12 text-center">
-        <i class="fas fa-inbox text-slate-600 text-4xl mb-3"></i>
-        <p class="text-slate-400">Nenhuma campanha encontrada</p>
-      </div>
-    </template>
-    <template x-for="c in filtered" :key="c.id">
-      <div class="glass rounded-2xl overflow-hidden transition-all hover:border-slate-600/60 cursor-pointer"
-           :class="selectedId === c.id ? 'border-blue-500/40' : ''"
-           @click="selectedId = selectedId === c.id ? null : c.id">
-        <!-- Main row -->
-        <div class="p-4 flex items-center gap-4">
-          <!-- Health dot -->
-          <div class="flex-shrink-0">
-            <span class="w-3 h-3 rounded-full block" :class="healthDot(health(c))"></span>
-          </div>
-          <!-- Name + account -->
-          <div class="flex-1 min-w-0">
-            <p class="text-white font-medium text-sm truncate" x-text="c.name"></p>
-            <p class="text-slate-500 text-xs" x-text="c.account || 'Conta desconhecida'"></p>
-          </div>
-          <!-- Status badge -->
-          <span class="hidden sm:inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold flex-shrink-0"
-                :style="c.status==='active' ? 'background:rgba(16,185,129,0.12);color:#10b981;border:1px solid rgba(16,185,129,0.25)' : 'background:rgba(100,116,139,0.12);color:#94a3b8;border:1px solid rgba(100,116,139,0.25)'">
-            <span class="w-1.5 h-1.5 rounded-full mr-1.5" :class="c.status==='active'?'bg-emerald-500':'bg-slate-500'"></span>
-            <span x-text="c.status==='active'?'Ativa':'Pausada'"></span>
-          </span>
-          <!-- Health badge -->
-          <span class="hidden lg:inline-flex px-2.5 py-1 rounded-lg text-xs font-semibold flex-shrink-0"
-                :style="'background:'+healthColor(health(c))+'18;color:'+healthColor(health(c))+';border:1px solid '+healthColor(health(c))+'35'">
-            <span x-text="healthLabel(health(c))"></span>
-          </span>
-          <!-- KPIs -->
-          <div class="hidden md:flex items-center gap-5 flex-shrink-0">
-            <div class="text-right"><p class="text-white font-mono text-sm font-semibold" x-text="'$'+Number(c.spend||0).toFixed(2)"></p><p class="text-slate-500 text-xs">Gasto</p></div>
-            <div class="text-right"><p class="text-white font-mono text-sm font-semibold" :style="c.roas>=3?'color:#10b981':c.roas>0&&c.roas<2?'color:#ef4444':''" x-text="Number(c.roas||0).toFixed(2)+'x'"></p><p class="text-slate-500 text-xs">ROAS</p></div>
-            <div class="text-right"><p class="text-white font-mono text-sm font-semibold" x-text="'$'+Number(c.cpa||0).toFixed(2)"></p><p class="text-slate-500 text-xs">CPA</p></div>
-            <div class="text-right"><p class="text-white font-mono text-sm font-semibold" x-text="Number(c.ctr||0).toFixed(2)+'%'"></p><p class="text-slate-500 text-xs">CTR</p></div>
-            <div class="text-right"><p class="text-white font-mono text-sm font-semibold" x-text="c.conversions||0"></p><p class="text-slate-500 text-xs">Conversões</p></div>
-          </div>
-          <!-- Expand arrow -->
-          <i class="fas fa-chevron-down text-slate-500 text-xs transition-transform flex-shrink-0" :class="selectedId===c.id?'rotate-180':''"></i>
-        </div>
-        <!-- Expanded row -->
-        <div x-show="selectedId === c.id" x-transition class="border-t border-slate-700/40 p-4 bg-slate-900/40">
-          <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
-            ${['spend','roas','cpa','ctr','conversions','status'].map(k=>`
-            <div class="bg-slate-800/40 rounded-xl p-3">
-              <p class="text-slate-400 text-xs mb-1">${{spend:'Gasto',roas:'ROAS',cpa:'CPA',ctr:'CTR',conversions:'Conversões',status:'Status'}[k]||k}</p>
-              <p class="text-white font-mono text-sm font-bold">-</p>
-            </div>`).join('')}
-          </div>
-          <div class="flex flex-wrap gap-2">
-            <button @click.stop="c.status==='active' ? pauseCampaign(c.id) : activateCampaign(c.id)"
+  <!-- Full Metrics Table -->
+  <div x-show="!loading" class="rounded-2xl overflow-hidden" style="background:rgba(30,41,59,0.6);border:1px solid rgba(51,65,85,0.4);">
+    <div class="overflow-x-auto">
+      <table class="w-full text-xs" style="min-width:900px;">
+        <thead>
+          <tr style="background:rgba(15,23,42,0.8);border-bottom:1px solid rgba(51,65,85,0.5);">
+            <th class="text-left px-3 py-2.5 text-slate-400 font-semibold sticky left-0 z-10 min-w-[200px]" style="background:rgba(15,23,42,0.95);">Campanha</th>
+            <th class="px-2 py-2.5 text-slate-500 font-medium">Status</th>
+            ${vis.map(k=>`<th @click="toggleSort('${k}')" class="px-2.5 py-2.5 text-slate-400 font-semibold cursor-pointer hover:text-white whitespace-nowrap text-right">
+              ${this.COL_LABELS[k]}
+              <i class="fas fa-sort ml-0.5 text-slate-600 text-xs" :class="sortBy==='${k}'?(sortDir==='desc'?'fa-sort-down text-blue-400':'fa-sort-up text-blue-400'):'fa-sort'"></i>
+            </th>`).join('')}
+            <th class="px-2 py-2.5 text-slate-500 font-medium">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-if="filtered.length===0">
+            <tr><td :colspan="${vis.length+3}" class="text-center py-12 text-slate-500">
+              <i class="fas fa-inbox text-2xl mb-2 block"></i>Nenhuma campanha encontrada
+            </td></tr>
+          </template>
+          <template x-for="c in filtered" :key="c.id">
+            <tr class="border-b transition-colors cursor-pointer group" style="border-color:rgba(51,65,85,0.3);"
+              :class="selectedId===c.id?'bg-blue-500/5':'hover:bg-slate-800/30'"
+              @click="selectedId=selectedId===c.id?null:c.id">
+              <!-- Name cell (sticky) -->
+              <td class="px-3 py-2.5 sticky left-0 z-10" :style="selectedId===c.id?'background:rgba(59,130,246,0.07)':'background:rgba(30,41,59,0.97)'">
+                <div class="flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full flex-shrink-0" :class="healthDot(health(c))"></span>
+                  <div class="min-w-0">
+                    <p class="text-white font-medium truncate max-w-[160px]" x-text="c.name"></p>
+                    <p class="text-slate-500 truncate max-w-[160px]" x-text="c.account||''"></p>
+                  </div>
+                </div>
+              </td>
+              <!-- Status -->
+              <td class="px-2 py-2.5 text-center">
+                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs font-semibold"
+                  :style="c.status==='active'?'background:rgba(16,185,129,0.12);color:#10b981':'background:rgba(100,116,139,0.12);color:#94a3b8'">
+                  <span class="w-1 h-1 rounded-full" :class="c.status==='active'?'bg-emerald-500':'bg-slate-500'"></span>
+                  <span x-text="c.status==='active'?'Ativa':'Pausada'"></span>
+                </span>
+              </td>
+              <!-- Metric cells -->
+              ${vis.map(k=>`<td class="px-2.5 py-2.5 text-right font-mono whitespace-nowrap" :style="'${this.metricColor(k,0)}'" x-text="fmtMetric('${k}', c['${k}'])"></td>`).join('')}
+              <!-- Actions -->
+              <td class="px-2 py-2.5 text-center">
+                <div class="flex items-center gap-1 justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button @click.stop="c.status==='active'?pauseCampaign(c.id):activateCampaign(c.id)"
                     :disabled="actionLoading[c.id]"
-                    class="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all"
-                    :class="c.status==='active' ? 'bg-red-500/15 text-red-400 hover:bg-red-500/25 border border-red-500/25' : 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/25'">
-              <i :class="actionLoading[c.id] ? 'fas fa-spinner animate-spin' : (c.status==='active'?'fas fa-pause':'fas fa-play')"></i>
-              <span x-text="c.status==='active'?'Pausar':'Ativar'"></span>
-            </button>
-            <button @click.stop="$dispatch('navigate',{page:'chat'})"
-                    class="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 border border-blue-500/25 transition-all">
-              <i class="fas fa-robot"></i>
-              <span>Analisar com IA</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </template>
+                    class="px-2 py-1 rounded-lg text-xs font-medium transition-all"
+                    :class="c.status==='active'?'bg-red-500/15 text-red-400 hover:bg-red-500/25':'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'">
+                    <i :class="actionLoading[c.id]?'fas fa-spinner animate-spin':c.status==='active'?'fas fa-pause':'fas fa-play'"></i>
+                  </button>
+                  <button @click.stop="$dispatch('navigate',{page:'chat'})" class="px-2 py-1 rounded-lg text-xs bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 transition-all">
+                    <i class="fas fa-robot"></i>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+    <div class="px-4 py-2 text-xs text-slate-600 border-t" style="border-color:rgba(51,65,85,0.3);">
+      <span x-text="filtered.length+' de '+campaigns.length+' campanhas'"></span>
+      <span class="ml-3">• Clique na linha para mais detalhes • Arraste para ver mais colunas →</span>
+    </div>
   </div>
+
 </div>`;
   }
 }));
@@ -1383,19 +1469,23 @@ Alpine.data('IdeasPage', () => ({
 // ══════════════════════════════════════════════════════════════════════════════
 Alpine.data('AnalysisPage', () => ({
   data: null,
-  period: 30,
+  period: 'last_30d',
   loading: false,
   charts: {},
   activeTab: 'overview',
+  _periodDays: {today:1,yesterday:1,last_7d:7,last_14d:14,last_30d:30,last_90d:90},
 
   async init() {
     await this.load();
     window.addEventListener('page-refresh', () => this.load());
   },
 
+  async setPeriod(p) { this.period = p; await this.load(); },
+
   async load() {
     this.loading = true;
-    const r = await API.get(`/api/analysis/overview?days=${this.period}`);
+    const days = this._periodDays[this.period] || 30;
+    const r = await API.get(`/api/analysis/overview?days=${days}`);
     if (r) {
       this.data = r;
       await this.$nextTick();
@@ -1481,12 +1571,9 @@ Alpine.data('AnalysisPage', () => ({
       <h2 class="text-white font-bold text-xl">Análise Profunda</h2>
       <p class="text-slate-400 text-sm mt-0.5">Performance detalhada com evolução histórica</p>
     </div>
-    <div class="flex gap-2">
-      ${[7,14,30,60,90].map(d=>`
-      <button @click="period=${d}; load()" class="px-3 py-1.5 rounded-xl text-xs font-medium transition-all border"
-              :class="period===${d} ? 'bg-blue-600 text-white border-blue-500' : 'text-slate-400 border-slate-700/50 hover:border-slate-600'">
-        ${d}d
-      </button>`).join('')}
+    <div class="flex gap-1.5 flex-wrap">
+      ${[{v:'today',l:'Hoje'},{v:'yesterday',l:'Ontem'},{v:'last_7d',l:'7 dias'},{v:'last_14d',l:'14 dias'},{v:'last_30d',l:'30 dias'},{v:'last_90d',l:'Máximo'}].map(p=>`
+      <button @click="setPeriod('${p.v}')" :class="period==='${p.v}'?'bg-blue-600/30 text-blue-300 border-blue-500/50':'text-slate-400 border-slate-700/50 hover:text-slate-300'" class="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all">${p.l}</button>`).join('')}
     </div>
   </div>
 

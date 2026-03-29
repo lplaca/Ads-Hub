@@ -27,24 +27,26 @@ Alpine.data('AccountDetailPage', function() {
     expandedCamp: {},
     adsets: {},
     adsetsLoading: {},
+    expandedAdset: {},
+    ads: {},
+    adsLoading: {},
     PERIODS,
 
     async init() {
-      const id = window._selectedAccountId;
-      if (!id) {
-        this.$dispatch('navigate', { page: 'accounts' });
-        return;
+      // Load immediately if navigated here with an account already set
+      if (window._selectedAccountId) {
+        await this.load();
       }
-      window.addEventListener('navigate', (e) => {
-        if (e.detail?.page === 'account-detail') {
-          this.account = null;
-          this.campaigns = [];
-          this.expandedCamp = {};
-          this.adsets = {};
-          this.load();
-        }
-      });
-      await this.load();
+    },
+
+    onNav() {
+      this.account = null;
+      this.campaigns = [];
+      this.expandedCamp = {};
+      this.adsets = {};
+      this.expandedAdset = {};
+      this.ads = {};
+      this.load();
     },
 
     get accId() { return window._selectedAccountId; },
@@ -55,7 +57,7 @@ Alpine.data('AccountDetailPage', function() {
     },
 
     async load() {
-      if (!this.accId) return;
+      if (!this.accId) { console.warn('[AccountDetail] load() called but no accId'); return; }
       this.loading = true;
       this.campaigns = [];
       this.expandedCamp = {};
@@ -65,10 +67,14 @@ Alpine.data('AccountDetailPage', function() {
       if (this.period === 'custom' && this.customFrom && this.customTo) {
         url = `/api/accounts/${this.accId}/overview?period=custom&date_from=${this.customFrom}&date_to=${this.customTo}`;
       }
+      console.log('[AccountDetail] fetching', url);
       const data = await API.get(url);
+      console.log('[AccountDetail] data received:', data);
       if (data) {
         this.account = data;
         this.campaigns = data.campaigns || [];
+      } else {
+        console.error('[AccountDetail] API.get returned null — check network tab for errors');
       }
       this.loading = false;
     },
@@ -102,6 +108,27 @@ Alpine.data('AccountDetailPage', function() {
       const data = await API.get(url);
       this.adsets = { ...this.adsets, [campId]: data || [] };
       this.adsetsLoading = { ...this.adsetsLoading, [campId]: false };
+    },
+
+    async toggleAds(campId, adsetId) {
+      const key = `${campId}_${adsetId}`;
+      const open = this.expandedAdset[key];
+      this.expandedAdset = { ...this.expandedAdset, [key]: !open };
+      if (!open && !this.ads[key]) {
+        await this.loadAds(campId, adsetId);
+      }
+    },
+
+    async loadAds(campId, adsetId) {
+      const key = `${campId}_${adsetId}`;
+      this.adsLoading = { ...this.adsLoading, [key]: true };
+      let url = `/api/accounts/${this.accId}/campaigns/${campId}/adsets/${adsetId}/ads?period=${this.period}`;
+      if (this.period === 'custom' && this.customFrom && this.customTo) {
+        url += `&date_from=${this.customFrom}&date_to=${this.customTo}`;
+      }
+      const data = await API.get(url);
+      this.ads = { ...this.ads, [key]: data || [] };
+      this.adsLoading = { ...this.adsLoading, [key]: false };
     },
 
     statusColor(s) {
@@ -365,9 +392,12 @@ Alpine.data('AccountDetailPage', function() {
                 <span class="text-right">Budget/dia</span>
               </div>
               <template x-for="as in adsets[camp.id]" :key="as.id">
-                <div class="hidden lg:grid px-8 py-2.5 items-center gap-2 hover:bg-blue-500/5 transition-colors" style="grid-template-columns: 2fr 80px 90px 80px 80px 70px 80px 80px 100px; background:rgba(15,23,42,0.3); border-bottom:1px solid rgba(51,65,85,0.15);">
+                <div>
+                <!-- Adset row desktop -->
+                <div class="hidden lg:grid px-8 py-2.5 items-center gap-2 hover:bg-blue-500/5 transition-colors cursor-pointer" @click="toggleAds(camp.id, as.id)" style="grid-template-columns: 2fr 80px 90px 80px 80px 70px 80px 80px 100px; background:rgba(15,23,42,0.3); border-bottom:1px solid rgba(51,65,85,0.15);">
                   <div class="flex items-center gap-2 min-w-0">
                     <div class="w-1 h-4 rounded-full flex-shrink-0" :style="'background:'+statusColor(as.status)"></div>
+                    <i class="fas text-slate-600 text-xs flex-shrink-0" :class="expandedAdset[camp.id+'_'+as.id]?'fa-chevron-down':'fa-chevron-right'"></i>
                     <p class="text-slate-300 text-xs truncate" x-text="as.name"></p>
                   </div>
                   <div class="text-right">
@@ -382,16 +412,77 @@ Alpine.data('AccountDetailPage', function() {
                   <p class="text-slate-500 text-xs text-right" x-text="as.daily_budget ? fmtMoney(as.daily_budget) : '—'"></p>
                 </div>
                 <!-- Mobile adset -->
-                <div class="lg:hidden px-6 py-2.5 flex items-center gap-2" style="background:rgba(15,23,42,0.3); border-bottom:1px solid rgba(51,65,85,0.15);">
+                <div class="lg:hidden px-6 py-2.5 flex items-center gap-2 cursor-pointer" @click="toggleAds(camp.id, as.id)" style="background:rgba(15,23,42,0.3); border-bottom:1px solid rgba(51,65,85,0.15);">
                   <div class="w-1 h-6 rounded-full flex-shrink-0" :style="'background:'+statusColor(as.status)"></div>
                   <div class="flex-1 min-w-0">
-                    <p class="text-slate-300 text-xs truncate" x-text="as.name"></p>
+                    <div class="flex items-center gap-1.5">
+                      <i class="fas text-slate-600 text-xs" :class="expandedAdset[camp.id+'_'+as.id]?'fa-chevron-down':'fa-chevron-right'"></i>
+                      <p class="text-slate-300 text-xs truncate" x-text="as.name"></p>
+                    </div>
                     <div class="flex gap-3 mt-1">
                       <span class="text-blue-300 text-xs" x-text="fmtMoney(as.spend)"></span>
                       <span class="text-green-300 text-xs" x-text="(as.conversions||0)+' conv'"></span>
                       <span class="text-xs font-semibold" :style="'color:'+roasColor(as.roas||0)" x-text="(as.roas||0)>0?fmt(as.roas,2)+'x ROAS':'—'"></span>
                     </div>
                   </div>
+                </div>
+
+                <!-- Ads rows (expanded from adset) -->
+                <div x-show="expandedAdset[camp.id+'_'+as.id]" style="display:none;">
+                  <div x-show="adsLoading[camp.id+'_'+as.id]" class="px-12 py-3 flex items-center gap-2 text-slate-500 text-xs" style="background:rgba(8,14,28,0.5);">
+                    <i class="fas fa-circle-notch fa-spin text-purple-400"></i> Carregando anúncios...
+                  </div>
+                  <div x-show="!adsLoading[camp.id+'_'+as.id] && ads[camp.id+'_'+as.id] && ads[camp.id+'_'+as.id].length===0"
+                       class="px-12 py-2.5 text-slate-600 text-xs italic" style="background:rgba(8,14,28,0.5);">
+                    Nenhum anúncio encontrado.
+                  </div>
+                  <template x-if="!adsLoading[camp.id+'_'+as.id] && ads[camp.id+'_'+as.id] && ads[camp.id+'_'+as.id].length>0">
+                    <div>
+                      <!-- Ads header -->
+                      <div class="hidden lg:grid px-12 py-1.5 text-xs text-slate-700 font-semibold uppercase tracking-wider" style="grid-template-columns: 2fr 80px 90px 80px 80px 70px 80px 80px 80px; background:rgba(8,14,28,0.6);">
+                        <span>Anúncio</span>
+                        <span class="text-right">Status</span>
+                        <span class="text-right">Gasto</span>
+                        <span class="text-right">Impr.</span>
+                        <span class="text-right">Cliques</span>
+                        <span class="text-right">CTR</span>
+                        <span class="text-right">Conv.</span>
+                        <span class="text-right">ROAS</span>
+                        <span class="text-right">CPA</span>
+                      </div>
+                      <template x-for="ad in ads[camp.id+'_'+as.id]" :key="ad.id">
+                        <div class="hidden lg:grid px-12 py-2 items-center gap-2 hover:bg-purple-500/5 transition-colors" style="grid-template-columns: 2fr 80px 90px 80px 80px 70px 80px 80px 80px; background:rgba(8,14,28,0.4); border-bottom:1px solid rgba(51,65,85,0.1);">
+                          <div class="flex items-center gap-2 min-w-0">
+                            <div class="w-1 h-3 rounded-full flex-shrink-0" :style="'background:'+statusColor(ad.status)"></div>
+                            <p class="text-slate-400 text-xs truncate" x-text="ad.name"></p>
+                          </div>
+                          <div class="text-right">
+                            <span class="text-xs" :class="ad.status==='active'?'text-purple-400':'text-slate-600'" x-text="statusLabel(ad.status)"></span>
+                          </div>
+                          <p class="text-purple-300 text-xs text-right" x-text="fmtMoney(ad.spend)"></p>
+                          <p class="text-slate-600 text-xs text-right" x-text="fmtBig(ad.impressions)"></p>
+                          <p class="text-slate-600 text-xs text-right" x-text="fmtBig(ad.clicks)"></p>
+                          <p class="text-slate-600 text-xs text-right" x-text="fmt(ad.ctr,2)+'%'"></p>
+                          <p class="text-green-400 text-xs text-right" x-text="ad.conversions||0"></p>
+                          <p class="text-xs text-right font-semibold" :style="'color:'+roasColor(ad.roas||0)" x-text="(ad.roas||0)>0?fmt(ad.roas,2)+'x':'—'"></p>
+                          <p class="text-amber-400 text-xs text-right" x-text="(ad.cpa||0)>0?fmtMoney(ad.cpa):'—'"></p>
+                        </div>
+                        <!-- Mobile ad -->
+                        <div class="lg:hidden px-10 py-2 flex items-center gap-2" style="background:rgba(8,14,28,0.4); border-bottom:1px solid rgba(51,65,85,0.1);">
+                          <div class="w-1 h-5 rounded-full flex-shrink-0" :style="'background:'+statusColor(ad.status)"></div>
+                          <div class="flex-1 min-w-0">
+                            <p class="text-slate-400 text-xs truncate" x-text="ad.name"></p>
+                            <div class="flex gap-3 mt-0.5">
+                              <span class="text-purple-300 text-xs" x-text="fmtMoney(ad.spend)"></span>
+                              <span class="text-green-300 text-xs" x-text="(ad.conversions||0)+' conv'"></span>
+                              <span class="text-xs font-semibold" :style="'color:'+roasColor(ad.roas||0)" x-text="(ad.roas||0)>0?fmt(ad.roas,2)+'x':'—'"></span>
+                            </div>
+                          </div>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                </div>
                 </div>
               </template>
             </div>

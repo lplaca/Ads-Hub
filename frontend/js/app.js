@@ -75,6 +75,7 @@ const NAV = [
   { id:'analysis',     label:'Análise Profunda',  icon:'fas fa-magnifying-glass-chart', subtitle:'Gráficos e métricas avançadas', group:'ai' },
 
   // ── Gestão ──
+  { id:'intel',        label:'Inteligência',       icon:'fas fa-globe',                 subtitle:'Pesquise estratégias globais em Reddit, YouTube, X e blogs', group:'management', badge:'WEB' },
   { id:'connections',  label:'Conexões de API',   icon:'fas fa-plug',                  subtitle:'Tokens Meta e capacidades disponíveis', group:'management' },
   { id:'importar',     label:'Importar Produtos', icon:'fas fa-file-import',           subtitle:'Sync Google Sheets + lançar campanhas com 1 clique', group:'management', badge:'NOVO' },
   { id:'bm',           label:'Business Managers', icon:'fas fa-building',              subtitle:'Gerencie seus BMs conectados', group:'management' },
@@ -85,6 +86,7 @@ const NAV = [
   { id:'reports',      label:'Relatórios',        icon:'fas fa-file-chart-column',     subtitle:'Gere e exporte relatórios', group:'management' },
   { id:'quickactions', label:'Ações Rápidas',     icon:'fas fa-bolt',                  subtitle:'Pause ou ative campanhas rapidamente', group:'management' },
   { id:'settings',     label:'Configurações',     icon:'fas fa-gear',                  subtitle:'Preferências e integrações', group:'management' },
+  { id:'sync',         label:'Sync de Trabalho',  icon:'fas fa-arrows-rotate',         subtitle:'Registre sessões e publique no ClickUp & Notion', group:'management' },
   { id:'manual',       label:'Manual',            icon:'fas fa-book-open',             subtitle:'Guia completo passo a passo da plataforma', group:'management' },
   // hidden (navigated programmatically)
   { id:'account-detail', label:'Detalhe da Conta', icon:'fas fa-chart-bar', subtitle:'Campanhas e conjuntos de anúncios', group:'management' },
@@ -103,25 +105,54 @@ Alpine.data('App', () => ({
   toastQueue: [],
   notifLog: [],
   alertCount: 0,
+  // ── Live data ─────────────────────────────────────────────────────────────
+  liveData: null,
+  liveUpdatedAt: null,
+  livePulse: false,
+  _liveInterval: null,
+  LIVE_INTERVAL_MS: 60_000,   // 60s default; pages can override per-page
 
   get pageTitle()    { return NAV.find(n=>n.id===this.currentPage)?.label    || ''; },
   get pageSubtitle() { return NAV.find(n=>n.id===this.currentPage)?.subtitle || ''; },
+  get liveTimestamp() {
+    if (!this.liveUpdatedAt) return '';
+    try {
+      return new Date(this.liveUpdatedAt).toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    } catch { return ''; }
+  },
 
   async init() {
     window.addEventListener('resize', () => { this.isMobile = window.innerWidth < 1024; });
     window.addEventListener('show-toast', e => this.addToast(e.detail));
     window.addEventListener('navigate', e => { if (e.detail?.page) this.navigate(e.detail.page); });
-    // Fetch app status
     await this.$store.meta.refresh();
-    // Fetch alert count
     const alerts = await API.get('/api/alerts');
     if (alerts) this.alertCount = alerts.filter(a => a.status === 'active').length;
+    // Start live polling
+    await this.pollLive();
+    this._liveInterval = setInterval(() => this.pollLive(), this.LIVE_INTERVAL_MS);
+  },
+
+  async pollLive() {
+    if (this.$store.meta.accountCount === 0) return;
+    const data = await API.get('/api/live?period=today');
+    if (data) {
+      this.liveData = data;
+      this.liveUpdatedAt = data.updated_at;
+      // Pulse animation
+      this.livePulse = true;
+      setTimeout(() => { this.livePulse = false; }, 1200);
+      // Broadcast to pages that are listening
+      window.dispatchEvent(new CustomEvent('live-update', { detail: data }));
+    }
   },
 
   navigate(page) {
     this.currentPage = page;
     this.sidebarOpen = false;
     window.scrollTo(0,0);
+    // Immediately refresh live data on nav change
+    this.pollLive();
   },
 
   async refreshData() {
@@ -173,7 +204,7 @@ function toast(type, message) {
 //  DASHBOARD
 // ══════════════════════════════════════════════════════════════════════════════
 Alpine.data('Dashboard', () => ({
-  period: '7',
+  period: 'last_7d',
   viewBy: 'account',
   customFrom: '', customTo: '',
   showCustom: false,
@@ -191,7 +222,7 @@ Alpine.data('Dashboard', () => ({
 
   async fetchDashboard() {
     this.loading = true;
-    const data = await API.get(`/api/dashboard?period=${parseInt(this.period)||7}&view_by=${this.viewBy}`);
+    const data = await API.get(`/api/dashboard?period=${this.period}&view_by=${this.viewBy}`);
     this.apiData = data || {};
     const rawTs = (data && data.time_series) || [];
     this.ts = {
@@ -330,21 +361,17 @@ Alpine.data('Dashboard', () => ({
             <option value="country">Por País</option>
           </select>
         </div>
-        <div class="flex items-center gap-2 flex-1 min-w-[200px]">
-          <label class="text-slate-400 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Período</label>
-          <select @change="period=$event.target.value; showCustom=$event.target.value==='custom'" class="form-select flex-1">
-            <option value="7">Últimos 7 dias</option>
-            <option value="14">Últimos 14 dias</option>
-            <option value="30">Últimos 30 dias</option>
-            <option value="custom">Personalizado</option>
-          </select>
+        <div class="flex items-center gap-1.5 flex-wrap">
+          ${[{v:'today',l:'Hoje'},{v:'yesterday',l:'Ontem'},{v:'last_7d',l:'7 dias'},{v:'last_14d',l:'14 dias'},{v:'last_30d',l:'30 dias'},{v:'last_90d',l:'Máximo'},{v:'custom',l:'Personalizado'}].map(p=>`
+          <button @click="period='${p.v}'; showCustom='${p.v}'==='custom'" :class="period==='${p.v}'?'bg-blue-600/30 text-blue-300 border-blue-500/50':'text-slate-400 border-slate-700/50 hover:text-slate-300'" class="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all">${p.l}</button>`).join('')}
         </div>
         <div x-show="showCustom" class="flex items-center gap-2 flex-wrap">
           <input type="date" x-model="customFrom" class="form-input" style="width:140px;" />
           <span class="text-slate-500 text-xs">até</span>
           <input type="date" x-model="customTo" class="form-input" style="width:140px;" />
+          <button @click="fetchDashboard()" class="btn btn-primary btn-sm">Aplicar</button>
         </div>
-        <button @click="$dispatch('show-toast',{type:'success',message:'Dados atualizados!'})" class="btn btn-primary btn-sm whitespace-nowrap">
+        <button @click="fetchDashboard()" class="btn btn-primary btn-sm whitespace-nowrap ml-auto">
           <i class="fas fa-rotate-right"></i> Atualizar
         </button>
       </div>

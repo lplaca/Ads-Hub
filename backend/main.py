@@ -2,10 +2,13 @@
 Meta Ads Control Center - Backend API
 FastAPI + SQLite - Serves frontend + API
 """
-import os, json, uuid, random, requests as http_req, threading, time
+import os, json, uuid, random, requests as http_req, threading, time, hashlib, secrets
+import smtplib, ssl
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from typing import Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -157,6 +160,16 @@ def init_db():
             key TEXT PRIMARY KEY,
             value TEXT
         );
+        CREATE TABLE IF NOT EXISTS work_sessions (
+            id TEXT PRIMARY KEY,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            snapshot_before TEXT,
+            snapshot_after TEXT,
+            diff TEXT,
+            status TEXT DEFAULT 'active',
+            notes TEXT
+        );
         CREATE TABLE IF NOT EXISTS rule_engine_log (
             id TEXT PRIMARY KEY,
             ran_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -298,12 +311,43 @@ def init_db():
             status TEXT DEFAULT 'active',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            email TEXT UNIQUE NOT NULL,
+            name TEXT DEFAULT '',
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            token TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            color TEXT DEFAULT '#3b82f6',
+            user_id TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS intel_history (
+            id TEXT PRIMARY KEY,
+            query TEXT NOT NULL,
+            sources TEXT DEFAULT '[]',
+            results_json TEXT DEFAULT '[]',
+            synthesis TEXT DEFAULT '',
+            result_count INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
     """)
     conn.commit()
     # Migrations: add columns introduced after initial schema
     migrations = [
         "ALTER TABLE alerts ADD COLUMN rule_name TEXT",
         "ALTER TABLE rules ADD COLUMN last_run TIMESTAMP",
+        "ALTER TABLE business_managers ADD COLUMN project_id TEXT DEFAULT ''",
+        "ALTER TABLE ad_accounts ADD COLUMN project_id TEXT DEFAULT ''",
     ]
     for m in migrations:
         try:
@@ -356,50 +400,15 @@ def fetch_meta_campaigns(account_id: str, token: str) -> list:
     return data.get("data", [])
 
 def fetch_meta_insights(campaign_id: str, token: str, date_preset: str = "last_7d") -> dict:
-    """Fetch campaign insights (spend, conversions, ROAS, CTR) from Meta API."""
+    """Fetch campaign insights from Meta API — full metric set."""
     data = meta_get(
         f"{campaign_id}/insights",
         token,
-        {
-            "fields": "spend,impressions,clicks,ctr,actions,action_values,cost_per_action_type",
-            "date_preset": date_preset
-        }
+        {"fields": _META_INSIGHT_FIELDS, "date_preset": date_preset}
     )
     if "error" in data or not data.get("data"):
         return {}
-    d = data["data"][0]
-    spend = float(d.get("spend", 0))
-    impressions = int(d.get("impressions", 0))
-    clicks = int(d.get("clicks", 0))
-    ctr = float(d.get("ctr", 0))
-
-    # Parse conversions (purchases)
-    conversions = 0
-    checkouts = 0
-    revenue = 0.0
-    for action in d.get("actions", []):
-        if action["action_type"] in ("purchase", "offsite_conversion.fb_pixel_purchase"):
-            conversions += int(float(action.get("value", 0)))
-        if action["action_type"] in ("initiate_checkout", "offsite_conversion.fb_pixel_initiate_checkout"):
-            checkouts += int(float(action.get("value", 0)))
-    for av in d.get("action_values", []):
-        if av["action_type"] in ("purchase", "offsite_conversion.fb_pixel_purchase"):
-            revenue += float(av.get("value", 0))
-
-    roas = round(revenue / spend, 2) if spend > 0 else 0
-    cpa = round(spend / conversions, 2) if conversions > 0 else 0
-
-    return {
-        "spend": spend,
-        "impressions": impressions,
-        "clicks": clicks,
-        "ctr": round(ctr, 2),
-        "conversions": conversions,
-        "checkouts": checkouts,
-        "revenue": revenue,
-        "roas": roas,
-        "cpa": cpa,
-    }
+    return _parse_campaign_insights(data["data"][0])
 
 def pause_meta_campaign(campaign_id: str, token: str) -> bool:
     """Pause a campaign on Meta."""
@@ -1185,8 +1194,10 @@ def _fetch_all_campaigns_cached(ttl: int = 300):
     _dashboard_cache["ts"] = now
     return all_campaigns
 
+_PERIOD_DAYS = {"today": 1, "yesterday": 1, "last_7d": 7, "last_14d": 14, "last_30d": 30, "last_90d": 90}
+
 @app.get("/api/dashboard")
-def get_dashboard(period: int = 7, view_by: str = "account"):
+def get_dashboard(period: str = "last_7d", view_by: str = "account"):
     conn = get_db()
     acc_count = conn.execute("SELECT COUNT(*) FROM ad_accounts").fetchone()[0]
     conn.close()
@@ -1245,7 +1256,7 @@ def get_dashboard(period: int = 7, view_by: str = "account"):
             "conversions_change": 0,
             "roas_change": 0,
         },
-        "time_series": gen_time_series(period),
+        "time_series": gen_time_series(_PERIOD_DAYS.get(period, 7)),
         "by_account": list(by_account.values()),
         "by_country": list(by_country.values()),
         "campaigns": campaigns,
@@ -1254,9 +1265,13 @@ def get_dashboard(period: int = 7, view_by: str = "account"):
 # ─── Business Managers ────────────────────────────────────────────────────────
 
 @app.get("/api/bm")
-def list_bms():
+def list_bms(project_id: str = ""):
     conn = get_db()
-    rows = conn.execute("SELECT * FROM business_managers").fetchall()
+    active_project = project_id or get_setting("active_project_id", "")
+    if active_project:
+        rows = conn.execute("SELECT * FROM business_managers WHERE project_id=? OR project_id IS NULL OR project_id=''", (active_project,)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM business_managers").fetchall()
     conn.close()
     result = []
     for r in rows:
@@ -1269,9 +1284,10 @@ def list_bms():
 def add_bm(data: dict):
     conn = get_db()
     bid = str(uuid.uuid4())
+    project_id = data.get("project_id") or get_setting("active_project_id", "")
     conn.execute(
-        "INSERT INTO business_managers (id, name, bm_id, access_token) VALUES (?,?,?,?)",
-        (bid, data["name"], data["bm_id"], data["access_token"]),
+        "INSERT INTO business_managers (id, name, bm_id, access_token, project_id) VALUES (?,?,?,?,?)",
+        (bid, data["name"], data["bm_id"], data["access_token"], project_id),
     )
     # Auto-sync ad accounts linked to this BM
     imported = 0
@@ -1403,10 +1419,22 @@ def _insights_field(period: str, date_from: str = "", date_to: str = "", metrics
 
 def _insights_params(period: str, date_from: str = "", date_to: str = "") -> dict:
     """Build query params for a standalone /insights call (not inline)."""
-    fields = "spend,impressions,clicks,ctr,actions,action_values"
+    # NOTE: _META_INSIGHT_FIELDS is defined after _parse_campaign_insights below;
+    # Python resolves this at call time so no forward-reference issue.
+    fields = _META_INSIGHT_FIELDS
     if period == "custom" and date_from and date_to:
         return {"fields": fields, "time_range": json.dumps({"since": date_from, "until": date_to})}
     return {"fields": fields, "date_preset": period}
+
+
+_EMPTY_METRICS = {
+    "spend": 0, "revenue": 0, "impressions": 0, "reach": 0,
+    "clicks": 0, "link_clicks": 0, "ctr": 0,
+    "connect_rate": 0, "lp_view_rate": 0, "checkout_per_lpv": 0, "purchase_per_ic": 0,
+    "cpc_link": 0, "cost_per_lp": 0, "cpa": 0, "cost_per_checkout": 0,
+    "lpv": 0, "checkouts": 0, "conversions": 0,
+    "video_3s": 0, "video_thru": 0, "roas": 0,
+}
 
 
 def _fetch_account_insights(account_id: str, token: str, period: str, date_from: str = "", date_to: str = "") -> dict:
@@ -1414,17 +1442,14 @@ def _fetch_account_insights(account_id: str, token: str, period: str, date_from:
     params = _insights_params(period, date_from, date_to)
     data = meta_get(f"{account_id}/insights", token, params)
     rows = data.get("data", [])
-    return _parse_campaign_insights(rows[0]) if rows else {
-        "spend": 0, "impressions": 0, "clicks": 0, "ctr": 0,
-        "conversions": 0, "checkouts": 0, "revenue": 0, "roas": 0, "cpa": 0,
-    }
+    return _parse_campaign_insights(rows[0]) if rows else dict(_EMPTY_METRICS)
 
 
 def _fetch_campaign_insights_breakdown(account_id: str, token: str, period: str, date_from: str = "", date_to: str = "") -> dict:
     """Fetch per-campaign insights breakdown from account. Returns {campaign_id: metrics_dict}."""
     params = _insights_params(period, date_from, date_to)
     params["level"] = "campaign"
-    params["fields"] = "campaign_id,spend,impressions,clicks,ctr,actions,action_values"
+    params["fields"] = "campaign_id," + _META_INSIGHT_FIELDS
     data = meta_get(f"{account_id}/insights", token, params)
     result = {}
     for row in data.get("data", []):
@@ -1438,7 +1463,7 @@ def _fetch_adset_insights_breakdown(campaign_id: str, token: str, period: str, d
     """Fetch per-adset insights breakdown from campaign. Returns {adset_id: metrics_dict}."""
     params = _insights_params(period, date_from, date_to)
     params["level"] = "adset"
-    params["fields"] = "adset_id,spend,impressions,clicks,ctr,actions,action_values"
+    params["fields"] = "adset_id," + _META_INSIGHT_FIELDS
     data = meta_get(f"{campaign_id}/insights", token, params)
     result = {}
     for row in data.get("data", []):
@@ -1448,29 +1473,116 @@ def _fetch_adset_insights_breakdown(campaign_id: str, token: str, period: str, d
     return result
 
 
+def _fetch_ad_insights_breakdown(adset_id: str, token: str, period: str, date_from: str = "", date_to: str = "") -> dict:
+    """Fetch per-ad insights breakdown from adset. Returns {ad_id: metrics_dict}."""
+    params = _insights_params(period, date_from, date_to)
+    params["level"] = "ad"
+    params["fields"] = "ad_id," + _META_INSIGHT_FIELDS
+    data = meta_get(f"{adset_id}/insights", token, params)
+    result = {}
+    for row in data.get("data", []):
+        aid = row.get("ad_id")
+        if aid:
+            result[aid] = _parse_campaign_insights(row)
+    return result
+
+
+# ── Full metrics field string for Meta Graph API ─────────────────────────────
+_META_INSIGHT_FIELDS = (
+    "spend,impressions,reach,"
+    "clicks,inline_link_clicks,outbound_clicks,"
+    "ctr,cost_per_inline_link_click,"
+    "actions,action_values,cost_per_action_type,"
+    "video_3_sec_watched_actions,video_thruplay_watched_actions"
+)
+
+_PURCHASE_TYPES   = {"purchase", "offsite_conversion.fb_pixel_purchase", "omni_purchase"}
+_CHECKOUT_TYPES   = {"initiate_checkout", "offsite_conversion.fb_pixel_initiate_checkout", "omni_initiated_checkout"}
+_LPV_TYPES        = {"landing_page_view"}
+_VIDEO3S_TYPES    = {"video_view"}  # 3-second views come from video_3_sec_watched_actions
+_OUTBOUND_TYPES   = {"outbound_click"}
+
+
 def _parse_campaign_insights(ins: dict) -> dict:
-    """Parse a Meta API insights dict into metrics."""
-    spend = float(ins.get("spend", 0))
+    """Parse a Meta API insights dict into all key metrics."""
+    spend       = float(ins.get("spend", 0))
     impressions = int(ins.get("impressions", 0))
-    clicks = int(ins.get("clicks", 0))
-    ctr = float(ins.get("ctr", 0))
-    conversions = 0
-    checkouts = 0
-    revenue = 0.0
-    for action in ins.get("actions", []):
-        if action["action_type"] in ("purchase", "offsite_conversion.fb_pixel_purchase"):
-            conversions += int(float(action.get("value", 0)))
-        if action["action_type"] in ("initiate_checkout", "offsite_conversion.fb_pixel_initiate_checkout"):
-            checkouts += int(float(action.get("value", 0)))
+    reach       = int(ins.get("reach", 0))
+    clicks      = int(ins.get("clicks", 0))
+    link_clicks = int(ins.get("inline_link_clicks", 0))
+    ctr         = float(ins.get("ctr", 0))
+    cpc_link    = float(ins.get("cost_per_inline_link_click", 0))
+
+    conversions  = 0
+    checkouts    = 0
+    lpv          = 0      # landing page views
+    revenue      = 0.0
+    video_3s     = 0      # 3-second video views (connect rate numerator)
+    video_thru   = 0      # ThruPlay views
+
+    # Parse actions array
+    for a in ins.get("actions", []):
+        t   = a.get("action_type", "")
+        val = int(float(a.get("value", 0)))
+        if t in _PURCHASE_TYPES:   conversions += val
+        if t in _CHECKOUT_TYPES:   checkouts   += val
+        if t in _LPV_TYPES:        lpv         += val
+
+    # Parse action_values (revenue)
     for av in ins.get("action_values", []):
-        if av["action_type"] in ("purchase", "offsite_conversion.fb_pixel_purchase"):
+        if av.get("action_type", "") in _PURCHASE_TYPES:
             revenue += float(av.get("value", 0))
-    roas = round(revenue / spend, 2) if spend > 0 else 0
-    cpa = round(spend / conversions, 2) if conversions > 0 else 0
+
+    # video_3_sec_watched_actions is a list like [{"action_type":"video_view","value":"123"}]
+    for v in ins.get("video_3_sec_watched_actions", []):
+        video_3s += int(float(v.get("value", 0)))
+    for v in ins.get("video_thruplay_watched_actions", []):
+        video_thru += int(float(v.get("value", 0)))
+
+    # ── Derived metrics ───────────────────────────────────────────────────────
+    roas        = round(revenue / spend, 2)          if spend > 0 else 0
+    cpa         = round(spend / conversions, 2)       if conversions > 0 else 0
+    cost_per_co = round(spend / checkouts, 2)         if checkouts > 0 else 0
+    cost_per_lp = round(spend / lpv, 2)               if lpv > 0 else 0
+    # Connect Rate: 3-sec video views / impressions (or reach for stricter def)
+    connect_rate      = round(video_3s / impressions * 100, 2) if impressions > 0 else 0
+    # LP View Rate: landing_page_views / link_clicks
+    lp_view_rate      = round(lpv / link_clicks * 100, 2)      if link_clicks > 0 else 0
+    # Checkout rate per LP view
+    checkout_per_lpv  = round(checkouts / lpv * 100, 2)         if lpv > 0 else 0
+    # Purchase rate per IC (initiate checkout → purchase)
+    purchase_per_ic   = round(conversions / checkouts * 100, 2) if checkouts > 0 else 0
+
     return {
-        "spend": spend, "impressions": impressions, "clicks": clicks,
-        "ctr": round(ctr, 2), "conversions": conversions, "checkouts": checkouts,
-        "revenue": revenue, "roas": roas, "cpa": cpa,
+        # spend / scale
+        "spend":             spend,
+        "revenue":           round(revenue, 2),
+        # reach & impressions
+        "impressions":       impressions,
+        "reach":             reach,
+        # clicks
+        "clicks":            clicks,
+        "link_clicks":       link_clicks,
+        # rates
+        "ctr":               round(ctr, 2),
+        "connect_rate":      connect_rate,
+        "lp_view_rate":      lp_view_rate,
+        "checkout_per_lpv":  checkout_per_lpv,
+        "purchase_per_ic":   purchase_per_ic,
+        # costs
+        "cpc_link":          round(cpc_link, 2),
+        "cost_per_lp":       cost_per_lp,
+        "cpa":               cpa,
+        "cost_per_checkout": cost_per_co,
+        # funnel volumes
+        "lpv":               lpv,
+        "checkouts":         checkouts,
+        "conversions":       conversions,
+        # video
+        "video_3s":          video_3s,
+        "video_thru":        video_thru,
+        # composite
+        "roas":              roas,
     }
 
 
@@ -1499,14 +1611,7 @@ def accounts_with_metrics(period: str = "last_7d", date_from: str = "", date_to:
             "country": a.get("country", ""),
             "status": a.get("status", "active"),
             "period": period,
-            "spend": m["spend"],
-            "impressions": m["impressions"],
-            "clicks": m["clicks"],
-            "ctr": m["ctr"],
-            "conversions": m["conversions"],
-            "revenue": m["revenue"],
-            "roas": m["roas"],
-            "cpa": m["cpa"],
+            **{k: m.get(k, 0) for k in _EMPTY_METRICS},
             "campaign_count": campaign_count,
             "active_campaigns": active_count,
         })
@@ -1534,11 +1639,9 @@ def account_overview(acc_id: str, period: str = "last_7d", date_from: str = "", 
     # 3. Fetch account-level totals (more reliable than summing campaigns)
     total_m = _fetch_account_insights(acct_id, token, period, date_from, date_to)
     # 4. Build campaign list merging all campaigns + their insights (0 if no activity)
-    empty_m = {"spend": 0, "impressions": 0, "clicks": 0, "ctr": 0,
-               "conversions": 0, "checkouts": 0, "revenue": 0, "roas": 0, "cpa": 0}
     campaigns = []
     for c in campaigns_raw:
-        m = camp_ins.get(c["id"], empty_m)
+        m = camp_ins.get(c["id"], dict(_EMPTY_METRICS))
         db_raw = c.get("daily_budget")
         lb_raw = c.get("lifetime_budget")
         campaigns.append({
@@ -1578,11 +1681,9 @@ def campaign_adsets(acc_id: str, camp_id: str, period: str = "last_7d", date_fro
     adsets_raw = data.get("data", []) if "data" in data else []
     # 2. Fetch per-adset insights breakdown
     adset_ins = _fetch_adset_insights_breakdown(camp_id, token, period, date_from, date_to)
-    empty_m = {"spend": 0, "impressions": 0, "clicks": 0, "ctr": 0,
-               "conversions": 0, "checkouts": 0, "revenue": 0, "roas": 0, "cpa": 0}
     adsets = []
     for s in adsets_raw:
-        m = adset_ins.get(s["id"], empty_m)
+        m = adset_ins.get(s["id"], dict(_EMPTY_METRICS))
         db_raw = s.get("daily_budget")
         adsets.append({
             "id": s["id"],
@@ -1593,6 +1694,27 @@ def campaign_adsets(acc_id: str, camp_id: str, period: str = "last_7d", date_fro
         })
     adsets.sort(key=lambda x: x["spend"], reverse=True)
     return adsets
+
+
+@app.get("/api/accounts/{acc_id}/campaigns/{camp_id}/adsets/{adset_id}/ads")
+def adset_ads(acc_id: str, camp_id: str, adset_id: str, period: str = "last_7d", date_from: str = "", date_to: str = ""):
+    """Return all ads for an adset with metrics."""
+    conn = get_db()
+    acc_row = conn.execute("SELECT * FROM ad_accounts WHERE id=?", (acc_id,)).fetchone()
+    conn.close()
+    if not acc_row:
+        raise HTTPException(status_code=404, detail="Conta não encontrada")
+    token = dict(acc_row).get("access_token", "")
+    data = meta_get(f"{adset_id}/ads", token, {"fields": "id,name,status", "limit": 200})
+    ads_raw = data.get("data", []) if "data" in data else []
+    ad_ins = _fetch_ad_insights_breakdown(adset_id, token, period, date_from, date_to)
+    ads = []
+    for a in ads_raw:
+        ads.append({"id": a["id"], "name": a["name"],
+                    "status": a.get("status", "UNKNOWN").lower(),
+                    **ad_ins.get(a["id"], dict(_EMPTY_METRICS))})
+    ads.sort(key=lambda x: x["spend"], reverse=True)
+    return ads
 
 
 # ─── API Connections ──────────────────────────────────────────────────────────
@@ -1711,10 +1833,35 @@ def get_aggregate_capabilities():
         "connection_count": len(rows)
     }
 
+# ─── Live Poll ────────────────────────────────────────────────────────────────
+
+@app.get("/api/live")
+def live_summary(period: str = "today"):
+    """Lightweight live poll: returns aggregated totals for all accounts.
+    Called by the frontend every N seconds to keep metrics fresh."""
+    conn = get_db()
+    accounts = conn.execute("SELECT * FROM ad_accounts").fetchall()
+    conn.close()
+    totals = dict(_EMPTY_METRICS)
+    account_data = []
+    for acc in accounts:
+        a = dict(acc)
+        m = _fetch_account_insights(a["account_id"], a["access_token"], period)
+        account_data.append({"id": a["id"], "name": a["name"], **m})
+        for k in _EMPTY_METRICS:
+            totals[k] = round(totals[k] + m.get(k, 0), 4)
+    return {
+        "updated_at": datetime.now().isoformat(),
+        "period": period,
+        "totals": totals,
+        "accounts": account_data,
+    }
+
+
 # ─── Campaigns ────────────────────────────────────────────────────────────────
 
 @app.get("/api/campaigns")
-def list_campaigns(status: Optional[str] = None):
+def list_campaigns(status: Optional[str] = None, period: str = "last_7d"):
     conn = get_db()
     accounts = conn.execute("SELECT * FROM ad_accounts").fetchall()
     conn.close()
@@ -1726,19 +1873,16 @@ def list_campaigns(status: Optional[str] = None):
         acc_d = dict(acc)
         meta_camps = fetch_meta_campaigns(acc_d["account_id"], acc_d["access_token"])
         for mc in meta_camps:
-            insights = fetch_meta_insights(mc["id"], acc_d["access_token"])
+            ins = fetch_meta_insights(mc["id"], acc_d["access_token"], period)
             camp = {
-                "id": mc["id"],
-                "name": mc["name"],
-                "account": acc_d["name"],
-                "account_id": acc_d["id"],
-                "country": acc_d.get("country", ""),
-                "status": mc["status"].lower(),
-                "spend": insights.get("spend", 0),
-                "conversions": insights.get("conversions", 0),
-                "roas": insights.get("roas", 0),
-                "cpa": insights.get("cpa", 0),
-                "ctr": insights.get("ctr", 0),
+                "id":           mc["id"],
+                "name":         mc["name"],
+                "account":      acc_d["name"],
+                "account_id":   acc_d["id"],
+                "country":      acc_d.get("country", ""),
+                "status":       mc["status"].lower(),
+                # all metrics from parser
+                **{k: ins.get(k, 0) for k in _EMPTY_METRICS},
             }
             if not status or camp["status"] == status:
                 all_campaigns.append(camp)
@@ -2791,6 +2935,844 @@ def startup():
     print("  Meta Ads Control Center v2")
     print("  http://localhost:8000")
     print("="*50 + "\n")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# WORK SESSIONS — ClickUp / Notion sync
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _take_campaign_snapshot() -> dict:
+    """Snapshot all campaigns with current status and budget."""
+    conn = get_db()
+    accounts = conn.execute("SELECT * FROM ad_accounts").fetchall()
+    conn.close()
+    snapshot = {}
+    for acc in accounts:
+        acc_d = dict(acc)
+        try:
+            camps = fetch_meta_campaigns(acc_d["account_id"], acc_d["access_token"])
+            snapshot[acc_d["id"]] = {
+                "name": acc_d["name"],
+                "country": acc_d.get("country", ""),
+                "account_id": acc_d["account_id"],
+                "campaigns": {
+                    c["id"]: {
+                        "id": c["id"],
+                        "name": c["name"],
+                        "status": c.get("status", "").lower(),
+                        "daily_budget": round(float(c.get("daily_budget", 0)) / 100, 2),
+                    }
+                    for c in camps
+                }
+            }
+        except Exception:
+            snapshot[acc_d["id"]] = {
+                "name": acc_d["name"], "country": acc_d.get("country", ""),
+                "account_id": acc_d["account_id"], "campaigns": {}
+            }
+    return snapshot
+
+
+def _compute_session_diff(before: dict, after: dict) -> dict:
+    """Compute changes between two snapshots. Returns diff per account."""
+    result = {}
+    all_ids = set(list(before.keys()) + list(after.keys()))
+    for acc_id in all_ids:
+        b_acc = before.get(acc_id, {})
+        a_acc = after.get(acc_id, b_acc)
+        b_camps = b_acc.get("campaigns", {})
+        a_camps = a_acc.get("campaigns", {})
+        changes = []
+        for cid in set(list(b_camps.keys()) + list(a_camps.keys())):
+            b, a = b_camps.get(cid), a_camps.get(cid)
+            if not b and a:
+                changes.append({"campaign": a["name"], "type": "new", "icon": "🆕", "detail": f"Criada — {a['status']}"})
+            elif b and not a:
+                changes.append({"campaign": b["name"], "type": "removed", "icon": "🗑️", "detail": "Removida"})
+            else:
+                name = a["name"]
+                if b["status"] != a["status"]:
+                    icon = "⏸️" if a["status"] == "paused" else "▶️"
+                    changes.append({"campaign": name, "type": "status", "icon": icon, "detail": f"{b['status']} → {a['status']}"})
+                if abs((b.get("daily_budget") or 0) - (a.get("daily_budget") or 0)) > 0.01:
+                    changes.append({"campaign": name, "type": "budget", "icon": "💰",
+                                    "detail": f"${b.get('daily_budget', 0):.2f} → ${a.get('daily_budget', 0):.2f}/dia"})
+        result[acc_id] = {
+            "name": a_acc.get("name") or b_acc.get("name", ""),
+            "country": a_acc.get("country") or b_acc.get("country", ""),
+            "account_id": a_acc.get("account_id") or b_acc.get("account_id", ""),
+            "changes": changes,
+            "total_campaigns": len(a_acc.get("campaigns", {})),
+        }
+    return result
+
+
+@app.post("/api/sessions/start")
+def session_start():
+    import uuid as _uuid
+    conn = get_db()
+    conn.execute("UPDATE work_sessions SET status='abandoned' WHERE status='active'")
+    conn.commit()
+    conn.close()
+    snapshot = _take_campaign_snapshot()
+    sid = str(_uuid.uuid4())
+    now = datetime.now().isoformat()
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO work_sessions (id, started_at, snapshot_before, status) VALUES (?,?,?,?)",
+        (sid, now, json.dumps(snapshot), "active")
+    )
+    conn.commit()
+    conn.close()
+    return {
+        "id": sid, "started_at": now,
+        "accounts": len(snapshot),
+        "campaigns": sum(len(a.get("campaigns", {})) for a in snapshot.values())
+    }
+
+
+@app.get("/api/sessions/active")
+def session_get_active():
+    conn = get_db()
+    row = conn.execute(
+        "SELECT id, started_at FROM work_sessions WHERE status='active' ORDER BY started_at DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    if not row:
+        return {"active": False}
+    d = dict(row)
+    return {"active": True, "id": d["id"], "started_at": d["started_at"]}
+
+
+@app.post("/api/sessions/{sid}/finish")
+def session_finish(sid: str):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM work_sessions WHERE id=?", (sid,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Sessão não encontrada")
+    before = json.loads(dict(row)["snapshot_before"] or "{}")
+    after = _take_campaign_snapshot()
+    diff = _compute_session_diff(before, after)
+    now = datetime.now().isoformat()
+    conn.execute(
+        "UPDATE work_sessions SET snapshot_after=?, diff=?, status='finished', finished_at=? WHERE id=?",
+        (json.dumps(after), json.dumps(diff), now, sid)
+    )
+    conn.commit()
+    conn.close()
+    # Also fetch current metrics for all accounts
+    metrics = {}
+    conn = get_db()
+    accounts = conn.execute("SELECT * FROM ad_accounts").fetchall()
+    conn.close()
+    for acc in accounts:
+        acc_d = dict(acc)
+        try:
+            m = _fetch_account_insights(acc_d["account_id"], acc_d["access_token"], "today")
+            metrics[acc_d["id"]] = {"name": acc_d["name"], "country": acc_d.get("country", ""), "metrics": m}
+        except Exception:
+            pass
+    return {"id": sid, "finished_at": now, "diff": diff, "metrics": metrics}
+
+
+@app.get("/api/sessions/notion-products")
+def notion_get_products():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT key, value FROM settings WHERE key IN ('notion_token','notion_products_db_id')"
+    ).fetchall()
+    conn.close()
+    s = {r["key"]: r["value"] for r in rows}
+    token, db_id = s.get("notion_token", ""), s.get("notion_products_db_id", "")
+    if not token or not db_id:
+        return []
+    try:
+        r = requests.post(
+            f"https://api.notion.com/v1/databases/{db_id}/query",
+            headers={"Authorization": f"Bearer {token}", "Notion-Version": "2022-06-28",
+                     "Content-Type": "application/json"},
+            json={"sorts": [{"property": "Produto", "direction": "ascending"}]},
+            timeout=15
+        )
+        products = []
+        for p in r.json().get("results", []):
+            props = p.get("properties", {})
+            title_arr = props.get("Produto", {}).get("title", [])
+            name = title_arr[0]["text"]["content"] if title_arr else ""
+            status = (props.get("Status", {}).get("select") or {}).get("name", "")
+            products.append({"id": p["id"], "name": name, "status": status})
+        return products
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# publish endpoint matching SyncPage frontend format
+@app.post("/api/sessions/{sid}/publish")
+def session_publish_v2(sid: str, data: dict):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM work_sessions WHERE id=?", (sid,)).fetchone()
+    settings_rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Sessão não encontrada")
+    s = {r["key"]: r["value"] for r in settings_rows}
+    to_clickup   = data.get("to_clickup", False)
+    to_notion    = data.get("to_notion", False)
+    products_data= data.get("products_data", {})   # {product_id: {name, spend, vendas, period, acao, obs}}
+    diff_summary = data.get("diff_summary", "")
+    now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
+    results = []
+
+    # ── ClickUp ──────────────────────────────────────────────────────────────
+    if to_clickup:
+        ck_key  = s.get("clickup_api_key", "")
+        ck_list = s.get("clickup_list_id", "901322010985")
+        if ck_key:
+            lines = [f"Meta Ads Update — {now_str}", "", diff_summary, ""]
+            for pid, pd in products_data.items():
+                lines.append(f"• {pd.get('name','')}: ${float(pd.get('spend',0) or 0):.2f} gasto | {pd.get('vendas',0)} vendas")
+                if pd.get("acao"): lines.append(f"  Ação: {pd['acao']}")
+                if pd.get("obs"):  lines.append(f"  Obs: {pd['obs']}")
+            title = f"Meta Ads — {datetime.now().strftime('%d/%m/%Y')}"
+            try:
+                r = http_req.post(
+                    f"https://api.clickup.com/api/v2/list/{ck_list}/task",
+                    headers={"Authorization": ck_key, "Content-Type": "application/json"},
+                    json={"name": title, "description": "\n".join(lines)},
+                    timeout=15
+                )
+                rj = r.json()
+                results.append({"target":"ClickUp","label":title,"ok": r.status_code < 300,"url": rj.get("url",""),"error": rj.get("err","")})
+            except Exception as e:
+                results.append({"target":"ClickUp","ok":False,"error":str(e)})
+        else:
+            results.append({"target":"ClickUp","ok":False,"error":"API key não configurada"})
+
+    # ── Notion ────────────────────────────────────────────────────────────────
+    if to_notion:
+        notion_token = s.get("notion_token", "")
+        notion_db    = s.get("notion_db_id", "")
+        today = datetime.now().strftime("%Y-%m-%d")
+        if notion_token and notion_db:
+            for pid, pd in products_data.items():
+                period_val = pd.get("period", "Tarde")
+                props = {
+                    "Título": {"title": [{"text": {"content": f"{pd.get('name','')} — {today}"}}]},
+                    "Data":   {"date": {"start": today}},
+                    "Período":{"select": {"name": period_val}},
+                    "Gasto (ad spend)": {"number": float(pd.get("spend", 0) or 0)},
+                    "Vendas": {"number": int(float(pd.get("vendas", 0) or 0))},
+                    "Ação tomada": {"rich_text": [{"text": {"content": pd.get("acao","")}}]},
+                    "Observação": {"rich_text": [{"text": {"content": pd.get("obs","")}}]},
+                }
+                try:
+                    r = http_req.post(
+                        "https://api.notion.com/v1/pages",
+                        headers={"Authorization": f"Bearer {notion_token}",
+                                 "Notion-Version": "2022-06-28",
+                                 "Content-Type": "application/json"},
+                        json={"parent": {"database_id": notion_db}, "properties": props},
+                        timeout=15
+                    )
+                    rj = r.json()
+                    results.append({"target":"Notion","label":pd.get("name",""),"ok": r.status_code < 300,"url": rj.get("url","")})
+                except Exception as e:
+                    results.append({"target":"Notion","label":pd.get("name",""),"ok":False,"error":str(e)})
+        else:
+            results.append({"target":"Notion","ok":False,"error":"Notion não configurado"})
+
+    conn2 = get_db()
+    conn2.execute("UPDATE work_sessions SET status='synced' WHERE id=?", (sid,))
+    conn2.commit()
+    conn2.close()
+    return {"ok": True, "results": results}
+
+
+# ─── Auth ──────────────────────────────────────────────────────────────────────
+
+def _hash_pw(pw: str) -> str:
+    salt = secrets.token_hex(16)
+    h = hashlib.pbkdf2_hmac('sha256', pw.encode(), salt.encode(), 100_000)
+    return f"{salt}:{h.hex()}"
+
+def _verify_pw(pw: str, stored: str) -> bool:
+    try:
+        salt, h = stored.split(":", 1)
+        check = hashlib.pbkdf2_hmac('sha256', pw.encode(), salt.encode(), 100_000)
+        return check.hex() == h
+    except Exception:
+        return False
+
+def _get_current_user(request: Request) -> Optional[dict]:
+    token = request.headers.get("X-Auth-Token") or request.cookies.get("auth_token")
+    if not token:
+        return None
+    conn = get_db()
+    row = conn.execute(
+        "SELECT us.user_id, u.email, u.name FROM user_sessions us "
+        "JOIN users u ON u.id = us.user_id "
+        "WHERE us.token=? AND us.expires_at > ?",
+        (token, datetime.now().isoformat())
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+@app.get("/api/auth/status")
+def auth_status():
+    """Returns whether any user exists (setup needed or not)."""
+    conn = get_db()
+    count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    conn.close()
+    return {"has_users": count > 0}
+
+@app.post("/api/auth/setup")
+def auth_setup(data: dict):
+    """Create the first user (only allowed if no users exist)."""
+    conn = get_db()
+    count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    if count > 0:
+        conn.close()
+        raise HTTPException(status_code=403, detail="Usuário já existe. Faça login.")
+    email = data.get("email", "").strip().lower()
+    pw    = data.get("password", "")
+    name  = data.get("name", "").strip()
+    if not email or not pw:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Email e senha obrigatórios")
+    uid = str(uuid.uuid4())
+    conn.execute("INSERT INTO users (id, email, name, password_hash) VALUES (?,?,?,?)",
+                 (uid, email, name, _hash_pw(pw)))
+    conn.commit()
+    token = secrets.token_hex(32)
+    exp   = (datetime.now() + timedelta(days=30)).isoformat()
+    conn.execute("INSERT INTO user_sessions (token, user_id, expires_at) VALUES (?,?,?)",
+                 (token, uid, exp))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "token": token, "user": {"id": uid, "email": email, "name": name}}
+
+@app.post("/api/auth/login")
+def auth_login(data: dict):
+    email = data.get("email", "").strip().lower()
+    pw    = data.get("password", "")
+    conn  = get_db()
+    user  = conn.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+    if not user or not _verify_pw(pw, user["password_hash"]):
+        conn.close()
+        raise HTTPException(status_code=401, detail="Email ou senha incorretos")
+    token = secrets.token_hex(32)
+    exp   = (datetime.now() + timedelta(days=30)).isoformat()
+    conn.execute("INSERT INTO user_sessions (token, user_id, expires_at) VALUES (?,?,?)",
+                 (token, user["id"], exp))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "token": token, "user": {"id": user["id"], "email": user["email"], "name": user["name"]}}
+
+@app.post("/api/auth/logout")
+def auth_logout(data: dict):
+    token = data.get("token", "")
+    if token:
+        conn = get_db()
+        conn.execute("DELETE FROM user_sessions WHERE token=?", (token,))
+        conn.commit()
+        conn.close()
+    return {"ok": True}
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    user = _get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autenticado")
+    return user
+
+@app.put("/api/auth/me")
+def auth_update_me(request: Request, data: dict):
+    user = _get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autenticado")
+    conn = get_db()
+    row = conn.execute("SELECT * FROM users WHERE id=?", (user["user_id"],)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    new_name  = data.get("name", row["name"])
+    new_email = data.get("email", row["email"]).strip().lower()
+    updates = [(new_name, new_email, row["id"])]
+    conn.execute("UPDATE users SET name=?, email=? WHERE id=?", updates[0])
+    if data.get("new_password"):
+        if not data.get("current_password"):
+            conn.close()
+            raise HTTPException(status_code=400, detail="Senha atual obrigatória")
+        if not _verify_pw(data["current_password"], row["password_hash"]):
+            conn.close()
+            raise HTTPException(status_code=400, detail="Senha atual incorreta")
+        conn.execute("UPDATE users SET password_hash=? WHERE id=?",
+                     (_hash_pw(data["new_password"]), row["id"]))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "user": {"id": row["id"], "email": new_email, "name": new_name}}
+
+
+# ─── Projects ──────────────────────────────────────────────────────────────────
+
+@app.get("/api/projects")
+def list_projects():
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM projects ORDER BY created_at").fetchall()
+    active = get_setting("active_project_id", "")
+    conn.close()
+    projects = [dict(r) for r in rows]
+    for p in projects:
+        p["is_active"] = (p["id"] == active)
+    return projects
+
+@app.post("/api/projects")
+def create_project(data: dict):
+    name  = data.get("name", "").strip()
+    color = data.get("color", "#3b82f6")
+    if not name:
+        raise HTTPException(status_code=400, detail="Nome obrigatório")
+    pid = str(uuid.uuid4())
+    conn = get_db()
+    conn.execute("INSERT INTO projects (id, name, color) VALUES (?,?,?)", (pid, name, color))
+    # If first project, auto-activate
+    count = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
+    if count == 1:
+        conn.execute("INSERT OR REPLACE INTO settings (key,value) VALUES ('active_project_id',?)", (pid,))
+    conn.commit()
+    conn.close()
+    return {"id": pid, "name": name, "color": color}
+
+@app.put("/api/projects/{pid}")
+def update_project(pid: str, data: dict):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM projects WHERE id=?", (pid,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+    name  = data.get("name", row["name"])
+    color = data.get("color", row["color"])
+    conn.execute("UPDATE projects SET name=?, color=? WHERE id=?", (name, color, pid))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+@app.delete("/api/projects/{pid}")
+def delete_project(pid: str):
+    conn = get_db()
+    conn.execute("DELETE FROM projects WHERE id=?", (pid,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+@app.post("/api/projects/{pid}/activate")
+def activate_project(pid: str):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM projects WHERE id=?", (pid,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+    conn.execute("INSERT OR REPLACE INTO settings (key,value) VALUES ('active_project_id',?)", (pid,))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "active_project_id": pid}
+
+@app.get("/api/projects/active")
+def get_active_project():
+    active_id = get_setting("active_project_id", "")
+    if not active_id:
+        return {"id": "", "name": "Todos os projetos", "color": "#64748b"}
+    conn = get_db()
+    row = conn.execute("SELECT * FROM projects WHERE id=?", (active_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else {"id": "", "name": "Todos os projetos", "color": "#64748b"}
+
+
+# ─── Web Intelligence ─────────────────────────────────────────────────────────
+
+def _extract_domain(url: str) -> str:
+    try:
+        from urllib.parse import urlparse
+        p = urlparse(url)
+        d = p.netloc.replace("www.", "")
+        return d
+    except Exception:
+        return url
+
+def _source_icon(domain: str) -> str:
+    d = domain.lower()
+    if "reddit.com" in d:  return "reddit"
+    if "youtube.com" in d: return "youtube"
+    if "twitter.com" in d or "x.com" in d: return "twitter"
+    if "instagram.com" in d: return "instagram"
+    if "tiktok.com" in d:  return "tiktok"
+    if "linkedin.com" in d: return "linkedin"
+    return "blog"
+
+def _serper_search(query: str, api_key: str, num: int = 8, search_type: str = "search") -> list:
+    """Search via Serper API (Google). Returns list of result dicts."""
+    url = f"https://google.serper.dev/{search_type}"
+    try:
+        r = http_req.post(
+            url,
+            headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+            json={"q": query, "num": num, "gl": "br"},
+            timeout=12
+        )
+        if not r.ok:
+            return []
+        data = r.json()
+        results = []
+        for item in data.get("organic", []) + data.get("news", []):
+            link = item.get("link", "")
+            results.append({
+                "title":   item.get("title", ""),
+                "link":    link,
+                "snippet": item.get("snippet", ""),
+                "date":    item.get("date", ""),
+                "domain":  _extract_domain(link),
+                "type":    _source_icon(_extract_domain(link)),
+            })
+        return results[:num]
+    except Exception:
+        return []
+
+def _brave_search(query: str, api_key: str, num: int = 8) -> list:
+    """Search via Brave Search API. Returns list of result dicts."""
+    try:
+        r = http_req.get(
+            "https://api.search.brave.com/res/v1/web/search",
+            headers={"Accept": "application/json", "X-Subscription-Token": api_key},
+            params={"q": query, "count": num, "safesearch": "moderate"},
+            timeout=12
+        )
+        if not r.ok:
+            return []
+        data = r.json()
+        results = []
+        for item in data.get("web", {}).get("results", []):
+            link = item.get("url", "")
+            results.append({
+                "title":   item.get("title", ""),
+                "link":    link,
+                "snippet": item.get("description", ""),
+                "date":    item.get("age", ""),
+                "domain":  _extract_domain(link),
+                "type":    _source_icon(_extract_domain(link)),
+            })
+        return results[:num]
+    except Exception:
+        return []
+
+def _run_intel_searches(query: str, sources: list, s: dict) -> list:
+    """Execute web searches for the given query and sources. Returns combined results."""
+    serper_key = s.get("serper_api_key", "")
+    brave_key  = s.get("brave_api_key", "")
+
+    if not serper_key and not brave_key:
+        return []
+
+    def search(q, typ="search"):
+        if serper_key:
+            return _serper_search(q, serper_key, num=6, search_type=typ)
+        return _brave_search(q, brave_key, num=6)
+
+    all_results = []
+    seen_links = set()
+
+    def add(results):
+        for r in results:
+            if r["link"] not in seen_links:
+                seen_links.add(r["link"])
+                all_results.append(r)
+
+    source_list = sources if sources and "all" not in sources else ["reddit","youtube","x","blogs","news"]
+
+    if "all" in sources or "reddit" in source_list:
+        add(search(f"{query} site:reddit.com"))
+
+    if "all" in sources or "youtube" in source_list:
+        add(search(f"{query} site:youtube.com"))
+
+    if "all" in sources or "x" in source_list:
+        add(search(f"{query} site:twitter.com OR site:x.com"))
+
+    if "all" in sources or "news" in source_list:
+        add(search(query, "news"))
+
+    if "all" in sources or "blogs" in source_list:
+        add(search(f"{query} blog estratégia marketing digital"))
+        add(search(query))
+
+    return all_results[:30]
+
+def _build_intel_synthesis(query: str, results: list, api_key: str, language: str = "pt-BR") -> str:
+    """Ask Claude to synthesize the search results into actionable intelligence."""
+    if not api_key or not results:
+        return ""
+
+    sources_text = "\n\n".join([
+        f"[{i+1}] {r['title']} ({r['domain']}, {r.get('date','')})\n{r['snippet']}\nURL: {r['link']}"
+        for i, r in enumerate(results[:20])
+    ])
+
+    system = (
+        "Você é um analista especialista em marketing digital, tráfego pago e Meta Ads. "
+        "Seu trabalho é sintetizar informações de diversas fontes da internet e entregar insights "
+        "altamente relevantes e práticos para um gestor de tráfego brasileiro. "
+        "Escreva em português brasileiro. Seja direto, específico e acionável. "
+        "Use markdown: **negrito** para pontos-chave, listas com • para estratégias, "
+        "e seções com ## para organizar. Cite as fontes com [1], [2] etc."
+    )
+
+    user_prompt = (
+        f"Pergunta do gestor: **{query}**\n\n"
+        f"Fontes encontradas na internet:\n\n{sources_text}\n\n"
+        "Sintetize essas informações e entregue:\n"
+        "1. Um resumo executivo (3-4 frases)\n"
+        "2. Estratégias e insights mais relevantes encontrados\n"
+        "3. O que está funcionando segundo essas fontes\n"
+        "4. Pontos de atenção ou tendências\n"
+        "5. Recomendações práticas para um gestor de Meta Ads no Brasil\n\n"
+        "Seja específico e cite as fontes."
+    )
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2048,
+            system=system,
+            messages=[{"role": "user", "content": user_prompt}]
+        )
+        return resp.content[0].text
+    except Exception as e:
+        return f"Erro ao gerar síntese: {str(e)}"
+
+
+@app.post("/api/intel/research")
+def intel_research(data: dict):
+    """Research any topic using web search + AI synthesis."""
+    query   = data.get("query", "").strip()
+    sources = data.get("sources", ["all"])
+    if not query:
+        raise HTTPException(status_code=400, detail="Query vazia")
+
+    conn = get_db()
+    settings_rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    conn.close()
+    s = {r["key"]: r["value"] for r in settings_rows}
+
+    api_key    = s.get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY", "")
+    serper_key = s.get("serper_api_key", "")
+    brave_key  = s.get("brave_api_key", "")
+
+    if not serper_key and not brave_key:
+        raise HTTPException(status_code=400, detail="Nenhuma chave de busca configurada. Configure serper_api_key ou brave_api_key em Configurações.")
+
+    # Run searches
+    results = _run_intel_searches(query, sources, s)
+
+    # AI synthesis
+    synthesis = ""
+    if api_key and results:
+        synthesis = _build_intel_synthesis(query, results, api_key)
+
+    # Save to intel_history
+    conn2 = get_db()
+    hid = str(uuid.uuid4())
+    conn2.execute(
+        "INSERT OR REPLACE INTO intel_history (id, query, sources, results_json, synthesis, created_at) VALUES (?,?,?,?,?,?)",
+        (hid, query, json.dumps(sources), json.dumps(results), synthesis, datetime.now().isoformat())
+    )
+    conn2.commit()
+    conn2.close()
+
+    return {
+        "id": hid,
+        "query": query,
+        "results": results,
+        "synthesis": synthesis,
+        "result_count": len(results),
+    }
+
+
+@app.get("/api/intel/history")
+def intel_history(limit: int = 20):
+    conn = get_db()
+    rows = conn.execute("SELECT id, query, sources, result_count, synthesis, created_at FROM intel_history ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.delete("/api/intel/history/{hid}")
+def intel_delete(hid: str):
+    conn = get_db()
+    conn.execute("DELETE FROM intel_history WHERE id=?", (hid,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ─── Email Alerts ──────────────────────────────────────────────────────────────
+
+def _send_email(to_addr: str, subject: str, html_body: str, s: dict) -> dict:
+    """Send an email using SMTP settings from the settings dict."""
+    smtp_host = s.get("smtp_host", "smtp.gmail.com")
+    smtp_port = int(s.get("smtp_port", "587") or "587")
+    smtp_user = s.get("smtp_user", "")
+    smtp_pass = s.get("smtp_pass", "")
+    from_addr = smtp_user or s.get("emailAddr", "")
+
+    if not smtp_user or not smtp_pass or not to_addr:
+        return {"ok": False, "error": "SMTP não configurado (smtp_user / smtp_pass / emailAddr)"}
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = from_addr
+    msg["To"]      = to_addr
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+    try:
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as srv:
+            srv.ehlo()
+            srv.starttls(context=ctx)
+            srv.login(smtp_user, smtp_pass)
+            srv.sendmail(from_addr, to_addr, msg.as_string())
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def _build_alert_email_html(alerts: list, campaigns: list) -> str:
+    """Build HTML email body for campaign alerts."""
+    now = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    # Build campaign lookup for metrics
+    camp_map = {c["id"]: c for c in campaigns} if campaigns else {}
+
+    rows_html = ""
+    for a in alerts:
+        camp = camp_map.get(a.get("campaign_id", ""), {})
+        spend  = f"${float(a.get('spend') or camp.get('spend') or 0):.2f}"
+        roas   = f"{float(camp.get('roas') or 0):.2f}x"
+        status = a.get("severity", "warning")
+        color  = "#ef4444" if status == "critical" else "#f59e0b"
+        icon   = "🔴" if status == "critical" else "⚠️"
+        rows_html += f"""
+        <tr>
+          <td style="padding:10px 12px; border-bottom:1px solid #1e293b; color:#e2e8f0;">{icon} {a.get('campaign_name','—')}</td>
+          <td style="padding:10px 12px; border-bottom:1px solid #1e293b; color:{color}; font-weight:600;">{a.get('severity','warning').upper()}</td>
+          <td style="padding:10px 12px; border-bottom:1px solid #1e293b; color:#94a3b8;">{a.get('message','')}</td>
+          <td style="padding:10px 12px; border-bottom:1px solid #1e293b; color:#e2e8f0;">{spend}</td>
+          <td style="padding:10px 12px; border-bottom:1px solid #1e293b; color:#e2e8f0;">{roas}</td>
+        </tr>"""
+
+    return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8" /></head>
+<body style="margin:0;padding:0;background:#0f172a;font-family:Inter,Arial,sans-serif;">
+  <div style="max-width:640px;margin:32px auto;background:#1e293b;border-radius:16px;overflow:hidden;border:1px solid #334155;">
+    <!-- Header -->
+    <div style="background:linear-gradient(135deg,#1d4ed8,#7c3aed);padding:24px 28px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div style="width:40px;height:40px;background:rgba(255,255,255,0.15);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;">📊</div>
+        <div>
+          <h1 style="margin:0;color:#fff;font-size:18px;font-weight:700;">Meta Ads — Alertas</h1>
+          <p style="margin:0;color:rgba(255,255,255,0.7);font-size:13px;">{now}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Body -->
+    <div style="padding:24px 28px;">
+      <p style="color:#cbd5e1;font-size:14px;margin:0 0 16px;">
+        Foram detectadas <strong style="color:#f87171;">{len(alerts)} campanha(s)</strong> que precisam de atenção.
+        Verifique e considere pausar ou ajustar o orçamento.
+      </p>
+
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead>
+          <tr style="background:#0f172a;">
+            <th style="padding:10px 12px;text-align:left;color:#64748b;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;">Campanha</th>
+            <th style="padding:10px 12px;text-align:left;color:#64748b;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;">Nível</th>
+            <th style="padding:10px 12px;text-align:left;color:#64748b;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;">Motivo</th>
+            <th style="padding:10px 12px;text-align:left;color:#64748b;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;">Gasto</th>
+            <th style="padding:10px 12px;text-align:left;color:#64748b;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;">ROAS</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows_html}
+        </tbody>
+      </table>
+
+      <div style="margin-top:20px;padding:12px 16px;background:#0f172a;border-radius:10px;border-left:3px solid #3b82f6;">
+        <p style="margin:0;color:#94a3b8;font-size:12px;">
+          Acesse a plataforma para tomar ação: pause campanhas, ajuste orçamentos ou altere segmentações conforme necessário.
+        </p>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="padding:16px 28px;border-top:1px solid #334155;">
+      <p style="margin:0;color:#475569;font-size:11px;text-align:center;">Meta Ads Control Center — Alerta automático</p>
+    </div>
+  </div>
+</body>
+</html>"""
+
+
+@app.post("/api/alerts/send-email")
+def send_alert_email(data: dict = {}):
+    """Send email with current active alerts + optional specific campaign list."""
+    conn = get_db()
+    settings_rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    s = {r["key"]: r["value"] for r in settings_rows}
+
+    # Get alerts to send
+    alert_ids = data.get("alert_ids", [])
+    if alert_ids:
+        placeholders = ",".join("?" * len(alert_ids))
+        alerts = [dict(r) for r in conn.execute(f"SELECT * FROM alerts WHERE id IN ({placeholders})", alert_ids).fetchall()]
+    else:
+        alerts = [dict(r) for r in conn.execute("SELECT * FROM alerts WHERE status='active' ORDER BY severity DESC, created_at DESC LIMIT 20").fetchall()]
+
+    # Get campaign metrics for enrichment
+    try:
+        campaigns = [dict(r) for r in conn.execute("SELECT * FROM campaigns LIMIT 500").fetchall()]
+    except Exception:
+        campaigns = []
+    conn.close()
+
+    if not alerts:
+        return {"ok": False, "error": "Nenhum alerta ativo para enviar"}
+
+    to_addr = data.get("to", s.get("emailAddr", s.get("email_alert_to", "")))
+    subject = data.get("subject", f"Meta Ads — {len(alerts)} alerta(s) de campanha [{datetime.now().strftime('%d/%m/%Y %H:%M')}]")
+    html_body = _build_alert_email_html(alerts, campaigns)
+    result = _send_email(to_addr, subject, html_body, s)
+    return result
+
+
+@app.post("/api/alerts/test-email")
+def test_alert_email(data: dict = {}):
+    """Send a test email to verify SMTP config."""
+    conn = get_db()
+    settings_rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    conn.close()
+    s = {r["key"]: r["value"] for r in settings_rows}
+    to_addr = data.get("to", s.get("emailAddr", ""))
+    if not to_addr:
+        raise HTTPException(status_code=400, detail="Email de destino não configurado em Configurações")
+    html = f"""<div style="font-family:Arial;padding:24px;background:#0f172a;color:#e2e8f0;border-radius:12px;">
+        <h2 style="color:#3b82f6;">✅ Email de teste — Meta Ads</h2>
+        <p>Configuração de email funcionando! Você receberá alertas de campanhas neste endereço.</p>
+        <p style="color:#64748b;font-size:12px;">{datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+    </div>"""
+    result = _send_email(to_addr, "Teste — Meta Ads Control Center", html, s)
+    return result
+
 
 if __name__ == "__main__":
     import uvicorn
