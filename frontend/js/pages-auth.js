@@ -258,10 +258,17 @@ Alpine.data('ProjectSwitcher', () => ({
       let pid = this.editId;
       if (pid) {
         await API.put(`/api/projects/${pid}`, this.form);
+        // Update in-place optimistically
+        const idx = this.projects.findIndex(p => p.id === pid);
+        if (idx >= 0) this.projects[idx] = { ...this.projects[idx], name: this.form.name, color: this.form.color };
       } else {
         const res = await API.post('/api/projects', this.form);
-        if (!res?.id) throw new Error('Servidor não retornou o projeto criado');
+        if (!res?.id) throw new Error('Servidor não retornou o projeto criado. Tente novamente.');
         pid = res.id;
+        // Immediately add to list and activate — don't wait for GET
+        const newProj = { id: pid, name: this.form.name, color: this.form.color, is_active: true };
+        this.projects = [...this.projects.map(p => ({...p, is_active: false})), newProj];
+        this.active = newProj;
       }
       // Save integrations if any field is filled
       const hasIntg = Object.values(this.integrations).some(v => v && v.trim());
@@ -271,12 +278,13 @@ Alpine.data('ProjectSwitcher', () => ({
       this.showModal = false;
       this.saveError = '';
       this.form = { name: '', color: '#3b82f6' };
-      await this.load();
-      window.dispatchEvent(new CustomEvent('project-changed'));
-      window.dispatchEvent(new CustomEvent('page-refresh'));
+      // Sync in background — don't await so UI is already updated
+      this.load().then(() => {
+        window.dispatchEvent(new CustomEvent('project-changed'));
+        window.dispatchEvent(new CustomEvent('page-refresh'));
+      });
       toast('success', this.editId ? 'Projeto atualizado!' : 'Projeto criado!');
     } catch(e) {
-      // Keep modal open so user can retry — show the error
       this.saveError = e?.message || 'Erro ao salvar. Tente novamente.';
       toast('error', this.saveError);
     } finally {
