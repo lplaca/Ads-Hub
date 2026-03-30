@@ -203,10 +203,16 @@
                 </div>
               </div>
             </div>
+            <!-- Error feedback -->
+            <div x-show="saveError" class="px-3 py-2 rounded-xl text-xs text-red-300 flex items-center gap-2" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);display:none;">
+              <i class="fas fa-triangle-exclamation flex-shrink-0"></i>
+              <span x-text="saveError"></span>
+            </div>
             <!-- Actions -->
             <div class="flex gap-2 pt-1">
-              <button @click="showModal=false" class="flex-1 py-2 rounded-xl text-sm text-slate-400 border border-slate-700 hover:border-slate-500">Cancelar</button>
+              <button @click="showModal=false; saveError=''" class="flex-1 py-2 rounded-xl text-sm text-slate-400 border border-slate-700 hover:border-slate-500">Cancelar</button>
               <button @click="save()" :disabled="saving" class="flex-1 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50" style="background:#2563eb;">
+                <i x-show="saving" class="fas fa-spinner animate-spin mr-1"></i>
                 <span x-text="saving ? 'Salvando...' : 'Salvar'"></span>
               </button>
             </div>

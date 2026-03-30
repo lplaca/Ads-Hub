@@ -31,36 +31,38 @@ window.Auth = {
     const headers = { ...(opts?.headers || {}), 'X-Auth-Token': token };
     return { ...opts, headers };
   };
-  const withTimeout = (ms = 20000) => {
+  const withTimeout = (ms = 60000) => {
     const ctrl = new AbortController();
     setTimeout(() => ctrl.abort(), ms);
     return ctrl.signal;
   };
   window.API = {
-    async get(path) {
+    async get(path, ms = 60000) {
       try {
-        const r = await fetch(path, { ...addHeaders({}), signal: withTimeout() });
+        const r = await fetch(path, { ...addHeaders({}), signal: withTimeout(ms) });
         if (r.status === 401) { Auth.clearSession(); location.reload(); return null; }
         return r.ok ? r.json() : null;
       } catch { return null; }
     },
-    async post(path, body) {
+    async post(path, body, ms = 60000) {
       try {
-        const r = await fetch(path, { ...addHeaders({ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }), signal: withTimeout() });
+        const r = await fetch(path, { ...addHeaders({ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }), signal: withTimeout(ms) });
         if (r.status === 401) { Auth.clearSession(); location.reload(); return null; }
-        return r.ok ? r.json() : null;
-      } catch { return null; }
+        if (!r.ok) { const e = await r.json().catch(()=>{}); throw new Error(e?.detail || `HTTP ${r.status}`); }
+        return r.json();
+      } catch(e) { throw e; }
     },
-    async put(path, body) {
+    async put(path, body, ms = 60000) {
       try {
-        const r = await fetch(path, { ...addHeaders({ method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }), signal: withTimeout() });
+        const r = await fetch(path, { ...addHeaders({ method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }), signal: withTimeout(ms) });
         if (r.status === 401) { Auth.clearSession(); location.reload(); return null; }
-        return r.ok ? r.json() : null;
-      } catch { return null; }
+        if (!r.ok) { const e = await r.json().catch(()=>{}); throw new Error(e?.detail || `HTTP ${r.status}`); }
+        return r.json();
+      } catch(e) { throw e; }
     },
-    async del(path) {
+    async del(path, ms = 60000) {
       try {
-        const r = await fetch(path, { ...addHeaders({ method:'DELETE' }), signal: withTimeout() });
+        const r = await fetch(path, { ...addHeaders({ method:'DELETE' }), signal: withTimeout(ms) });
         if (r.status === 401) { Auth.clearSession(); location.reload(); return null; }
         return r.ok ? r.json() : null;
       } catch { return null; }
@@ -205,6 +207,7 @@ Alpine.data('ProjectSwitcher', () => ({
   integrations: { notion_token: '', notion_analyses_db_id: '', notion_products_db_id: '', clickup_token: '', clickup_list_id: '' },
   saving: false,
   savingIntegrations: false,
+  saveError: '',
 
   COLORS: ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#f97316'],
 
@@ -250,26 +253,32 @@ Alpine.data('ProjectSwitcher', () => ({
   async save() {
     if (!this.form.name.trim()) return;
     this.saving = true;
+    this.saveError = '';
     try {
       let pid = this.editId;
       if (pid) {
         await API.put(`/api/projects/${pid}`, this.form);
       } else {
         const res = await API.post('/api/projects', this.form);
-        pid = res?.id;
+        if (!res?.id) throw new Error('Servidor não retornou o projeto criado');
+        pid = res.id;
       }
-      // Save integrations if any field filled
+      // Save integrations if any field is filled
       const hasIntg = Object.values(this.integrations).some(v => v && v.trim());
       if (pid && hasIntg) {
         await API.put(`/api/projects/${pid}/integrations`, this.integrations);
       }
       this.showModal = false;
+      this.saveError = '';
       this.form = { name: '', color: '#3b82f6' };
       await this.load();
       window.dispatchEvent(new CustomEvent('project-changed'));
       window.dispatchEvent(new CustomEvent('page-refresh'));
+      toast('success', this.editId ? 'Projeto atualizado!' : 'Projeto criado!');
     } catch(e) {
-      this.showModal = false;
+      // Keep modal open so user can retry — show the error
+      this.saveError = e?.message || 'Erro ao salvar. Tente novamente.';
+      toast('error', this.saveError);
     } finally {
       this.saving = false;
     }
