@@ -1,0 +1,150 @@
+/* ── Ads Hub — Design Tokens ──────────────────────────────────────────────── */
+:root {
+  /* Cores base */
+  --color-bg-base:     #090f1a;
+  --color-bg-surface:  #0f172a;
+  --color-bg-elevated: #1e293b;
+  --color-bg-hover:    #263045;
+  --color-border:      rgba(51, 65, 85, 0.5);
+  --color-border-focus:rgba(37, 99, 235, 0.6);
+
+  /* Texto */
+  --color-text-primary:   #f1f5f9;
+  --color-text-secondary: #94a3b8;
+  --color-text-muted:     #64748b;
+  --color-text-disabled:  #334155;
+
+  /* Acento */
+  --color-accent:       #2563eb;
+  --color-accent-hover: #1d4ed8;
+  --color-accent-light: rgba(37, 99, 235, 0.1);
+
+  /* Semânticas */
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-danger:  #ef4444;
+  --color-info:    #06b6d4;
+  --color-purple:  #8b5cf6;
+
+  /* Espaçamento */
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2rem;
+
+  /* Bordas */
+  --radius-sm:  0.5rem;
+  --radius-md:  0.75rem;
+  --radius-lg:  1rem;
+  --radius-xl:  1.25rem;
+  --radius-2xl: 1.5rem;
+
+  /* Sombras */
+  --shadow-sm:    0 1px 3px rgba(0,0,0,0.3);
+  --shadow-md:    0 4px 12px rgba(0,0,0,0.4);
+  --shadow-lg:    0 8px 32px rgba(0,0,0,0.5);
+  --shadow-modal: 0 25px 60px rgba(0,0,0,0.6);
+
+  /* Transições */
+  --transition-fast:   150ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow:   300ms ease;
+}
+
+/* ── Utilitários baseados nos tokens ──────────────────────────────────────── */
+.card {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2xl);
+}
+
+.card-hover {
+  transition: border-color var(--transition-normal);
+}
+.card-hover:hover {
+  border-color: rgba(51, 65, 85, 0.8);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--color-accent), #3b82f6);
+  color: white;
+  font-weight: 600;
+  border-radius: var(--radius-xl);
+  padding: 0.625rem 1rem;
+  font-size: 0.875rem;
+  transition: opacity var(--transition-fast);
+}
+.btn-primary:hover { opacity: 0.9; }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-secondary {
+  color: var(--color-text-secondary);
+  border: 1px solid rgba(51, 65, 85, 0.6);
+  border-radius: var(--radius-xl);
+  padding: 0.625rem 1rem;
+  font-size: 0.875rem;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+.btn-secondary:hover {
+  border-color: rgba(100, 116, 139, 0.8);
+  color: var(--color-text-primary);
+}
+
+/* ── Skeleton loading ─────────────────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(90deg,
+    rgba(30,41,59,0.8) 25%,
+    rgba(51,65,85,0.4) 50%,
+    rgba(30,41,59,0.8) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s infinite;
+  border-radius: var(--radius-md);
+}
+
+@keyframes skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── Empty state ──────────────────────────────────────────────────────────── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 5rem 1rem;
+  text-align: center;
+}
+
+.empty-state-icon {
+  width: 4rem;
+  height: 4rem;
+  border-radius: var(--radius-2xl);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1rem;
+  font-size: 1.5rem;
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.15);
+  color: #60a5fa;
+}
+
+/* ── Badge variants ───────────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.badge-success { background: rgba(34,197,94,0.12); color: var(--color-success); }
+.badge-warning { background: rgba(245,158,11,0.12); color: var(--color-warning); }
+.badge-danger  { background: rgba(239,68,68,0.12);  color: var(--color-danger); }
+.badge-info    { background: rgba(6,182,212,0.12);   color: var(--color-info); }
+.badge-purple  { background: rgba(139,92,246,0.12);  color: var(--color-purple); }
+.badge-neutral { background: rgba(100,116,139,0.12); color: var(--color-text-muted); }
