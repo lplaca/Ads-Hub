@@ -1271,4 +1271,162 @@ Alpine.data('AutomationPage', () => ({
   },
 }));
 
+
+// ── Produtos (top-level) ──────────────────────────────────────────────────────
+Alpine.data('ProductsTopPage', () => ({
+  projects: [], products: [], activeProject: null, loading: false,
+  async init() {
+    this.loading = true;
+    window.addEventListener('project-changed', () => this.load());
+    window.addEventListener('page-refresh', () => this.load());
+    await this.load();
+  },
+  async load() {
+    this.loading = true;
+    const [projects, products] = await Promise.all([API.get('/api/projects'), API.get('/api/products')]);
+    this.projects = projects || [];
+    this.products = products || [];
+    this.activeProject = this.projects.find(p => p.is_active) || null;
+    this.loading = false;
+  },
+  renderPage() {
+    if (this.loading) return `<div class="p-8 text-center text-slate-500"><i class="fas fa-spinner animate-spin text-2xl"></i></div>`;
+    const filtered = this.activeProject ? this.products.filter(p => p.project_id === this.activeProject.id) : this.products;
+    const rows = filtered.length === 0
+      ? `<div class="py-12 text-center text-slate-500">
+           <i class="fas fa-box text-3xl mb-3 block opacity-30"></i>
+           <p class="text-sm mb-3">Nenhum produto encontrado.</p>
+           <button @click="$dispatch('navigate',{page:'importar'})" class="px-4 py-2 rounded-xl text-sm text-amber-400 border border-amber-500/30 hover:bg-amber-500/10 transition-all">
+             <i class="fas fa-file-import mr-1.5"></i>Importar produtos
+           </button>
+         </div>`
+      : `<div class="overflow-x-auto"><table class="w-full text-sm">
+          <thead><tr class="text-left text-xs text-slate-500 border-b" style="border-color:rgba(51,65,85,0.5);">
+            <th class="pb-3 pr-4 font-medium">Nome</th>
+            <th class="pb-3 pr-4 font-medium hidden sm:table-cell">SKU</th>
+            <th class="pb-3 pr-4 font-medium hidden md:table-cell">Categoria</th>
+            <th class="pb-3 pr-4 font-medium">Preço</th>
+            <th class="pb-3 font-medium hidden lg:table-cell">Landing</th>
+          </tr></thead>
+          <tbody>${filtered.map(p => `
+            <tr class="border-b hover:bg-slate-800/30" style="border-color:rgba(51,65,85,0.3);">
+              <td class="py-3 pr-4"><p class="text-slate-200 font-medium">${p.name}</p>${p.description?`<p class="text-xs text-slate-500">${p.description.slice(0,60)}</p>`:''}</td>
+              <td class="py-3 pr-4 text-slate-500 font-mono text-xs hidden sm:table-cell">${p.sku||'—'}</td>
+              <td class="py-3 pr-4 hidden md:table-cell">${p.category?`<span class="px-2 py-0.5 rounded-full text-xs" style="background:rgba(245,158,11,0.1);color:#f59e0b;">${p.category}</span>`:'<span class="text-slate-600">—</span>'}</td>
+              <td class="py-3 pr-4 text-slate-200 font-medium">${p.price?'R$ '+Number(p.price).toFixed(2):'—'}</td>
+              <td class="py-3 hidden lg:table-cell">${p.landing_url?`<a href="${p.landing_url}" target="_blank" class="text-xs text-blue-400 hover:underline"><i class="fas fa-external-link-alt mr-1"></i>${p.landing_url.replace(/^https?:\/\//,'').slice(0,30)}</a>`:'<span class="text-slate-600 text-xs">—</span>'}</td>
+            </tr>`).join('')}
+          </tbody></table></div>`;
+    return `
+      <div class="p-6">
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <h2 class="text-xl font-bold text-white"><i class="fas fa-box text-amber-400 mr-2"></i>Produtos</h2>
+            <p class="text-sm text-slate-400">${filtered.length} produto(s)${this.activeProject?' em '+this.activeProject.name:''}</p>
+          </div>
+          <div class="flex gap-2">
+            <button @click="$dispatch('navigate',{page:'importar'})"
+                    class="px-3 py-2 rounded-xl text-sm text-slate-300 border border-slate-700 hover:border-amber-500/30 hover:text-amber-300 transition-all">
+              <i class="fas fa-file-import mr-1.5"></i>Importar
+            </button>
+          </div>
+        </div>
+        <div class="rounded-2xl p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">${rows}</div>
+      </div>`;
+  },
+}));
+
+
+// ── Shared placeholder factory ────────────────────────────────────────────────
+function _makePlaceholderPage(name, icon, color, title, desc, btnLabel, btnPage) {
+  Alpine.data(name, () => ({
+    init() {},
+    renderPage() {
+      return `
+        <div class="p-6">
+          <div class="mb-6 flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background:${color}15; border:1px solid ${color}30;">
+              <i class="${icon} text-sm" style="color:${color};"></i>
+            </div>
+            <div>
+              <h2 class="text-xl font-bold text-white">${title}</h2>
+              <p class="text-sm text-slate-400">${desc}</p>
+            </div>
+          </div>
+          <div class="rounded-2xl p-8 text-center" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
+            <i class="${icon} text-3xl mb-4 block" style="color:${color}40;"></i>
+            <p class="font-semibold text-slate-300 mb-2">${title}</p>
+            <p class="text-sm text-slate-500 max-w-sm mx-auto mb-4">${desc}</p>
+            ${btnLabel && btnPage ? `<button @click="$dispatch('navigate',{page:'${btnPage}'})"
+                    class="px-4 py-2 rounded-xl text-sm font-semibold text-white"
+                    style="background:linear-gradient(135deg,${color},${color}cc);">
+              <i class="${icon} mr-1.5"></i>${btnLabel}
+            </button>` : ''}
+          </div>
+        </div>`;
+    },
+  }));
+}
+
+_makePlaceholderPage('AdsetsPage',         'fas fa-object-group', '#1877f2', 'Conjuntos de Anúncios', 'Ad sets das campanhas Meta Ads. Selecione uma campanha para ver seus conjuntos.', 'Ver Campanhas', 'campaigns');
+_makePlaceholderPage('MetaAdsPage',        'fas fa-rectangle-ad', '#1877f2', 'Anúncios Meta', 'Criativos e anúncios individuais. Acesse via Campanhas → Conjunto → Anúncios.', 'Ver Campanhas', 'campaigns');
+_makePlaceholderPage('MetaCountriesPage',  'fas fa-globe',        '#1877f2', 'Países — Meta Ads', 'Segmentação e performance por país. Disponível após integração Meta API com dados de insights por país.', null, null);
+_makePlaceholderPage('ProductPerfPage',    'fas fa-chart-bar',    '#f59e0b', 'Performance por Produto', 'ROAS, receita e conversões atribuídas a cada produto via UTM parameters ou catálogo Meta.', 'Ver Produtos', 'products');
+_makePlaceholderPage('ProductCountriesPage','fas fa-flag',        '#f59e0b', 'Produtos por País', 'Organize seu catálogo por país de veiculação e veja quais produtos performam melhor em cada mercado.', null, null);
+_makePlaceholderPage('GoogleConnectPage',  'fab fa-google',       '#4285f4', 'Google Ads API', 'Configure as credenciais da Google Ads API (Developer Token + OAuth2) para integração completa.', null, null);
+_makePlaceholderPage('ClickupIntPage',     'fas fa-circle-check', '#7b68ee', 'ClickUp', 'Importe tarefas e sincronize decisões do Gestor IA com o ClickUp.', null, null);
+_makePlaceholderPage('NotionIntPage',      'fas fa-n',            '#ffffff', 'Notion', 'Sincronize análises, produtos e resultados com bases Notion por projeto.', null, null);
+_makePlaceholderPage('AiIntPage',          'fas fa-robot',        '#a855f7', 'IA — Claude / ChatGPT', 'Configure as chaves de API para Claude (Anthropic) e OpenAI utilizadas no Gestor IA.', null, null);
+
+
+// ── Google Ads placeholder pages ──────────────────────────────────────────────
+const _GOOGLE_PAGES = {
+  'google-overview':  { label: 'Visão Geral',        icon: 'fas fa-chart-pie' },
+  'google-accounts':  { label: 'Contas',              icon: 'fas fa-wallet' },
+  'google-campaigns': { label: 'Campanhas',           icon: 'fas fa-layer-group' },
+  'google-adgroups':  { label: 'Grupos de Anúncios',  icon: 'fas fa-object-group' },
+  'google-ads':       { label: 'Anúncios',            icon: 'fas fa-rectangle-ad' },
+  'google-keywords':  { label: 'Palavras-chave',      icon: 'fas fa-key' },
+  'google-analytics': { label: 'Análises',            icon: 'fas fa-chart-line' },
+};
+Alpine.data('GooglePlaceholderPage', () => ({
+  get _pg() {
+    const id = document.querySelector('[x-data="App"]')?._x_dataStack?.[0]?.currentPage || 'google-overview';
+    return _GOOGLE_PAGES[id] || { label: 'Google Ads', icon: 'fab fa-google' };
+  },
+  init() {},
+  renderPage() {
+    const pg = this._pg;
+    return `
+      <div class="p-6">
+        <div class="mb-6 flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background:rgba(66,133,244,0.1); border:1px solid rgba(66,133,244,0.2);">
+            <i class="${pg.icon} text-sm" style="color:#4285f4;"></i>
+          </div>
+          <div>
+            <h2 class="text-xl font-bold text-white">Google Ads — ${pg.label}</h2>
+            <p class="text-sm text-slate-400">Integração em desenvolvimento</p>
+          </div>
+        </div>
+        <div class="rounded-2xl p-8 text-center mb-6" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
+          <div class="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style="background:rgba(66,133,244,0.08); border:1px solid rgba(66,133,244,0.2);">
+            <i class="fab fa-google text-2xl" style="color:#4285f4;"></i>
+          </div>
+          <p class="font-semibold text-slate-300 mb-2">Google Ads — Em desenvolvimento</p>
+          <p class="text-sm text-slate-500 max-w-sm mx-auto">
+            A integração completa com Google Ads está sendo desenvolvida. Em breve terá gestão de campanhas, grupos, palavras-chave e análises.
+          </p>
+        </div>
+        <div class="grid grid-cols-3 sm:grid-cols-7 gap-2">
+          ${Object.entries(_GOOGLE_PAGES).map(([id, p]) => `
+            <div class="rounded-xl p-3 text-center opacity-40" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
+              <i class="${p.icon} text-slate-500 text-base mb-1 block"></i>
+              <p class="text-xs text-slate-600">${p.label}</p>
+            </div>`).join('')}
+        </div>
+      </div>`;
+  },
+}));
+
+
 }); // alpine:init

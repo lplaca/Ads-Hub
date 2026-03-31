@@ -142,90 +142,63 @@
     </div>
 
     <!-- Nav Items -->
-    <nav class="flex-1 p-2 overflow-y-auto overflow-x-hidden mt-1">
+    <nav class="flex-1 p-2 overflow-y-auto overflow-x-hidden" style="scrollbar-width:thin; scrollbar-color:rgba(51,65,85,0.4) transparent;">
 
-      <!-- ── Grupo: Comando ──────────────────────────────────────────────── -->
-      <div x-show="!sidebarCollapsed" class="px-2 py-1.5 mt-1 mb-0.5">
-        <p class="text-slate-600 text-xs font-semibold uppercase tracking-widest">Comando</p>
-      </div>
-      <template x-for="item in navItems.filter(n=>n.group==='main')" :key="item.id">
-        <button
-          @click="navigate(item.id)"
-          :class="currentPage === item.id
-            ? 'bg-blue-600/20 text-blue-400 border-blue-500/30'
-            : 'text-slate-500 hover:bg-slate-800/60 hover:text-slate-300 border-transparent'"
-          class="sidebar-item relative group"
-          :title="sidebarCollapsed ? item.label : ''"
-        >
-          <i :class="item.icon + ' icon text-base'" style="min-width:18px;"></i>
-          <span x-show="!sidebarCollapsed" class="text-sm font-medium whitespace-nowrap transition-all flex-1" x-text="item.label"></span>
-          <span x-show="item.id === 'alerts' && alertCount > 0 && !sidebarCollapsed" x-text="alertCount"
-                class="ml-auto text-xs font-bold bg-red-500 text-white rounded-full flex items-center justify-center"
-                style="min-width:20px; height:20px; padding:0 4px;"></span>
-          <span x-show="item.id === 'alerts' && alertCount > 0 && sidebarCollapsed"
-                class="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full pulse-dot"></span>
-        </button>
-      </template>
+      <template x-for="grp in navGroups" :key="grp.id">
+        <div class="mb-1">
 
-      <!-- ── Grupo: Operação ─────────────────────────────────────────────── -->
-      <div x-show="!sidebarCollapsed" class="px-2 py-1.5 mt-3 mb-0.5">
-        <p class="text-slate-600 text-xs font-semibold uppercase tracking-widest">Operação</p>
-      </div>
-      <div x-show="sidebarCollapsed" class="my-1.5 mx-2 border-t border-slate-700/50"></div>
-      <template x-for="item in navItems.filter(n=>n.group==='ops')" :key="item.id">
-        <button
-          @click="navigate(item.id)"
-          :class="currentPage === item.id
-            ? 'bg-blue-600/20 text-blue-400 border-blue-500/30'
-            : 'text-slate-500 hover:bg-slate-800/60 hover:text-slate-300 border-transparent'"
-          class="sidebar-item relative group"
-          :title="sidebarCollapsed ? item.label : ''"
-        >
-          <i :class="item.icon + ' icon text-base'" style="min-width:18px;"></i>
-          <span x-show="!sidebarCollapsed" class="text-sm font-medium whitespace-nowrap transition-all flex-1" x-text="item.label"></span>
-        </button>
-      </template>
+          <!-- Group header (sidebar expanded) -->
+          <button x-show="!sidebarCollapsed"
+                  @click="toggleGroup(grp.id)"
+                  class="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-bold uppercase tracking-widest transition-all mt-1"
+                  :style="openGroups[grp.id]
+                    ? 'color:' + grp.color + '; background:' + grp.bgColor
+                    : 'color:rgba(100,116,139,0.7)'">
+            <i :class="grp.icon" class="text-xs w-3 text-center flex-shrink-0"></i>
+            <span x-text="grp.label" class="flex-1 text-left"></span>
+            <i :class="openGroups[grp.id] ? 'fas fa-chevron-up' : 'fas fa-chevron-down'"
+               class="text-[9px] opacity-60"></i>
+          </button>
 
-      <!-- ── Grupo: Inteligência ─────────────────────────────────────────── -->
-      <div x-show="!sidebarCollapsed" class="px-2 py-1.5 mt-3 mb-0.5">
-        <p class="text-xs font-semibold uppercase tracking-widest" style="color:#3b82f6aa;">Inteligência</p>
-      </div>
-      <div x-show="sidebarCollapsed" class="my-1.5 mx-2 border-t border-slate-700/50"></div>
-      <template x-for="item in navItems.filter(n=>n.group==='intel')" :key="item.id">
-        <button
-          @click="navigate(item.id)"
-          :class="currentPage === item.id
-            ? 'bg-blue-600/20 text-blue-400 border-blue-500/30'
-            : 'text-slate-500 hover:bg-slate-800/60 hover:text-slate-300 border-transparent'"
-          class="sidebar-item relative group"
-          :title="sidebarCollapsed ? item.label : ''"
-        >
-          <i :class="item.icon + ' icon text-base'" style="min-width:18px;"></i>
-          <span x-show="!sidebarCollapsed" class="text-sm font-medium whitespace-nowrap transition-all flex-1" x-text="item.label"></span>
-          <span x-show="item.badge && item.badge !== 'alertCount' && !sidebarCollapsed"
-                class="text-xs font-bold px-1.5 py-0.5 rounded-md ml-auto"
-                style="background:rgba(59,130,246,0.2);color:#60a5fa;font-size:9px;"
-                x-text="item.badge"></span>
-        </button>
-      </template>
+          <!-- Group divider (sidebar collapsed) -->
+          <div x-show="sidebarCollapsed" class="my-1 mx-1 flex items-center gap-1">
+            <div class="h-px flex-1" :style="'background:' + grp.color + '30'"></div>
+            <i :class="grp.icon" class="text-[9px]" :style="'color:' + grp.color + '60'"></i>
+            <div class="h-px flex-1" :style="'background:' + grp.color + '30'"></div>
+          </div>
 
-      <!-- ── Grupo: Sistema ──────────────────────────────────────────────── -->
-      <div x-show="!sidebarCollapsed" class="px-2 py-1.5 mt-3 mb-0.5">
-        <p class="text-slate-600 text-xs font-semibold uppercase tracking-widest">Sistema</p>
-      </div>
-      <div x-show="sidebarCollapsed" class="my-1.5 mx-2 border-t border-slate-700/50"></div>
-      <template x-for="item in navItems.filter(n=>n.group==='config')" :key="item.id">
-        <button
-          @click="navigate(item.id)"
-          :class="currentPage === item.id
-            ? 'bg-blue-600/20 text-blue-400 border-blue-500/30'
-            : 'text-slate-500 hover:bg-slate-800/60 hover:text-slate-300 border-transparent'"
-          class="sidebar-item relative group"
-          :title="sidebarCollapsed ? item.label : ''"
-        >
-          <i :class="item.icon + ' icon text-base'" style="min-width:18px;"></i>
-          <span x-show="!sidebarCollapsed" class="text-sm font-medium whitespace-nowrap transition-all flex-1" x-text="item.label"></span>
-        </button>
+          <!-- Nav items for this group -->
+          <div x-show="openGroups[grp.id] || sidebarCollapsed">
+            <template x-for="item in navItems.filter(n=>n.group===grp.id)" :key="item.id">
+              <button
+                @click="navigate(item.id)"
+                :class="currentPage === item.id
+                  ? 'bg-blue-600/20 text-blue-400 border-blue-500/30'
+                  : 'text-slate-500 hover:bg-slate-800/60 hover:text-slate-300 border-transparent'"
+                class="sidebar-item relative group"
+                :title="sidebarCollapsed ? item.label : item.subtitle"
+              >
+                <i :class="item.icon + ' icon text-sm'" style="min-width:16px;"></i>
+                <span x-show="!sidebarCollapsed"
+                      class="text-sm font-medium whitespace-nowrap flex-1 text-left"
+                      x-text="item.label"></span>
+                <!-- alertCount badge -->
+                <span x-show="item.badge === 'alertCount' && alertCount > 0 && !sidebarCollapsed"
+                      x-text="alertCount"
+                      class="ml-auto text-xs font-bold bg-red-500 text-white rounded-full flex items-center justify-center flex-shrink-0"
+                      style="min-width:18px; height:18px; padding:0 3px;"></span>
+                <span x-show="item.badge === 'alertCount' && alertCount > 0 && sidebarCollapsed"
+                      class="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full pulse-dot"></span>
+                <!-- Static badge (IA, etc.) -->
+                <span x-show="item.badge && item.badge !== 'alertCount' && !sidebarCollapsed"
+                      x-text="item.badge"
+                      class="text-xs font-bold px-1 py-0.5 rounded ml-auto flex-shrink-0"
+                      style="background:rgba(59,130,246,0.2);color:#60a5fa;font-size:9px;"></span>
+              </button>
+            </template>
+          </div>
+
+        </div>
       </template>
 
     </nav>
@@ -498,6 +471,62 @@
         <!-- PROJECT DETAIL -->
         <div x-show="currentPage === 'project-detail'" x-data="ProjectDetailPage" x-init="init()"
              @navigate.window="if($event.detail?.page==='project-detail'){ projectId=$event.detail.projectId||window._activeProjectId; activeTab='overview'; init(); }">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- PRODUCTS (top-level) -->
+        <div x-show="currentPage === 'products'" x-data="ProductsTopPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- PRODUCT PERFORMANCE -->
+        <div x-show="currentPage === 'product-perf'" x-data="ProductPerfPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- PRODUCT COUNTRIES -->
+        <div x-show="currentPage === 'product-countries'" x-data="ProductCountriesPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- META ADS (criativos) -->
+        <div x-show="currentPage === 'meta-ads'" x-data="MetaAdsPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- META ADSETS -->
+        <div x-show="currentPage === 'adsets'" x-data="AdsetsPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- META COUNTRIES -->
+        <div x-show="currentPage === 'meta-countries'" x-data="MetaCountriesPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- GOOGLE ADS PAGES (placeholders) -->
+        <div x-show="['google-overview','google-accounts','google-campaigns','google-adgroups','google-ads','google-keywords','google-analytics'].includes(currentPage)"
+             x-data="GooglePlaceholderPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- INTEGRATIONS: Google Connect -->
+        <div x-show="currentPage === 'google-connect'" x-data="GoogleConnectPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- INTEGRATIONS: ClickUp -->
+        <div x-show="currentPage === 'clickup-int'" x-data="ClickupIntPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- INTEGRATIONS: Notion -->
+        <div x-show="currentPage === 'notion-int'" x-data="NotionIntPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- INTEGRATIONS: AI -->
+        <div x-show="currentPage === 'ai-int'" x-data="AiIntPage" x-init="init()">
           <div x-html="renderPage()"></div>
         </div>
 
