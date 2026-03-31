@@ -30,6 +30,7 @@ from backend.domains.dashboard import router as dashboard_router
 from backend.domains.knowledge import router as knowledge_router
 from backend.domains.settings_routes import router as settings_router
 from backend.domains.tasks import router as tasks_router
+from backend.domains.products import router as products_router
 
 app = FastAPI(title="Ads Hub", version="2.1.0")
 
@@ -60,6 +61,7 @@ app.include_router(dashboard_router)
 app.include_router(knowledge_router)
 app.include_router(settings_router)
 app.include_router(tasks_router)
+app.include_router(products_router)
 
 # Static files
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")

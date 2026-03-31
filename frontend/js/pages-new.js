@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   Novas páginas — stubs expandidos nas ETAPAs 3-7
+   Ads Hub — Páginas novas (pages-new.js)
    ═══════════════════════════════════════════════════════════════════════════ */
 
 document.addEventListener('alpine:init', () => {
@@ -32,9 +32,7 @@ Alpine.data('ProjectsPage', () => ({
   },
 
   editProject(p) {
-    Alpine.store('projectModal').show({
-      editId: p.id, name: p.name, color: p.color, onSave: () => this.load(),
-    });
+    Alpine.store('projectModal').show({ editId: p.id, name: p.name, color: p.color, onSave: () => this.load() });
   },
 
   async removeProject(pid) {
@@ -91,8 +89,7 @@ Alpine.data('ProjectsPage', () => ({
               </span>
               ${p.is_active ? '<span class="px-2 py-0.5 rounded-full text-xs font-medium" style="background:rgba(59,130,246,0.15);color:#60a5fa;">Selecionado</span>' : ''}
             </div>
-          </div>
-        `).join('');
+          </div>`).join('');
 
     return `
       <div class="p-6">
@@ -115,21 +112,37 @@ Alpine.data('ProjectsPage', () => ({
 }));
 
 
-// ── ProjectDetailPage ────────────────────────────────────────────────────────
+// ── ProjectDetailPage — workspace com abas ────────────────────────────────────
 Alpine.data('ProjectDetailPage', () => ({
   projectId: null,
-  summary: null,
-  health: null,
+  project: null,
+  activeTab: 'overview',
   loading: false,
+
+  // dados por aba
+  health: null,
+  summary: null,
+  products: [],
+  campaigns: [],
+  accounts: [],
+  bms: [],
+  alerts: [],
+  tasks: [],
+  rules: [],
+  integrations: null,
+
+  // produto form
+  showProductForm: false,
+  productForm: { name: '', description: '', sku: '', price: '', category: '', landing_url: '' },
+  savingProduct: false,
 
   async init() {
     this.projectId = window._activeProjectId || null;
-    if (this.projectId) await this.load();
-    window.addEventListener('page-refresh', () => { if (this.projectId) this.load(); });
+    if (this.projectId) await this.loadOverview();
+    window.addEventListener('page-refresh', () => { if (this.projectId) this.loadTab(this.activeTab); });
   },
 
-  async load() {
-    if (!this.projectId) return;
+  async loadOverview() {
     this.loading = true;
     const [summary, health] = await Promise.all([
       API.get('/api/projects/' + this.projectId + '/summary'),
@@ -137,111 +150,539 @@ Alpine.data('ProjectDetailPage', () => ({
     ]);
     this.summary = summary;
     this.health = health;
+    this.project = summary?.project || null;
+    this.alerts = summary?.alerts || [];
+    this.tasks = summary?.tasks || [];
     this.loading = false;
   },
 
-  healthColor(s) {
-    return { healthy: '#22c55e', warning: '#f59e0b', critical: '#ef4444' }[s] || '#64748b';
+  async loadTab(tab) {
+    this.activeTab = tab;
+    if (tab === 'overview') { await this.loadOverview(); return; }
+    this.loading = true;
+    if (tab === 'products') {
+      this.products = (await API.get('/api/products?project_id=' + this.projectId)) || [];
+    } else if (tab === 'meta') {
+      const [accounts, campaigns, bms, rules, alerts] = await Promise.all([
+        API.get('/api/projects/' + this.projectId + '/accounts'),
+        API.get('/api/projects/' + this.projectId + '/campaigns'),
+        API.get('/api/projects/' + this.projectId + '/bms'),
+        API.get('/api/projects/' + this.projectId + '/rules'),
+        API.get('/api/alerts?project_id=' + this.projectId),
+      ]);
+      this.accounts = accounts || [];
+      this.campaigns = campaigns || [];
+      this.bms = bms || [];
+      this.rules = rules || [];
+      this.alerts = alerts || [];
+    } else if (tab === 'integrations') {
+      this.integrations = await API.get('/api/projects/' + this.projectId + '/integrations');
+    }
+    this.loading = false;
   },
 
-  healthLabel(s) {
-    return { healthy: 'Saudável', warning: 'Atenção', critical: 'Crítico' }[s] || '-';
+  async saveProduct() {
+    if (!this.productForm.name.trim()) { toast('warning', 'Nome obrigatório'); return; }
+    this.savingProduct = true;
+    await API.post('/api/products', { ...this.productForm, project_id: this.projectId });
+    this.productForm = { name: '', description: '', sku: '', price: '', category: '', landing_url: '' };
+    this.showProductForm = false;
+    this.products = (await API.get('/api/products?project_id=' + this.projectId)) || [];
+    toast('success', 'Produto criado!');
+    this.savingProduct = false;
+  },
+
+  async deleteProduct(pid) {
+    if (!confirm('Remover produto?')) return;
+    await API.del('/api/products/' + pid);
+    this.products = this.products.filter(p => p.id !== pid);
+    toast('success', 'Produto removido');
+  },
+
+  async pauseCampaign(cid) {
+    await API.post('/api/campaigns/' + cid + '/pause');
+    toast('success', 'Campanha pausada');
+    await this.loadTab('meta');
+  },
+
+  async activateCampaign(cid) {
+    await API.post('/api/campaigns/' + cid + '/activate');
+    toast('success', 'Campanha ativada');
+    await this.loadTab('meta');
+  },
+
+  async saveIntegrations() {
+    await API.put('/api/projects/' + this.projectId + '/integrations', this.integrations);
+    toast('success', 'Integrações salvas!');
+  },
+
+  fmtCurrency(v) { return '$' + Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
+  fmtRoas(v)     { return Number(v || 0).toFixed(2) + 'x'; },
+
+  healthColor(s) { return { healthy: '#22c55e', warning: '#f59e0b', critical: '#ef4444' }[s] || '#64748b'; },
+  statusColor(s) { return { active: '#22c55e', paused: '#f59e0b', archived: '#64748b' }[s] || '#64748b'; },
+  severityColor(s) { return { critical: '#ef4444', warning: '#f59e0b' }[s] || '#64748b'; },
+
+  _tab(id, label, icon) {
+    const active = this.activeTab === id;
+    return `<button @click="loadTab('${id}')"
+              class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-all"
+              style="${active
+                ? 'background:rgba(37,99,235,0.15); color:#60a5fa; border:1px solid rgba(37,99,235,0.3);'
+                : 'color:#94a3b8; border:1px solid transparent;'}">
+              <i class="${icon} text-xs"></i>${label}
+            </button>`;
   },
 
   renderPage() {
-    if (this.loading) return `<div class="p-8 text-center text-slate-500"><i class="fas fa-spinner animate-spin text-2xl"></i></div>`;
-    if (!this.summary) return `<div class="p-8 text-center text-slate-500">Projeto não encontrado.</div>`;
+    if (!this.project && !this.loading) return `<div class="p-8 text-center text-slate-500">Projeto não encontrado.</div>`;
+    if (!this.project) return `<div class="p-8 text-center text-slate-500"><i class="fas fa-spinner animate-spin text-2xl"></i></div>`;
 
-    const p = this.summary.project;
+    const p = this.project;
     const hColor = this.health ? this.healthColor(this.health.status) : '#64748b';
-    const hLabel = this.health ? this.healthLabel(this.health.status) : '-';
-    const hScore = this.health ? this.health.score : '-';
 
-    const alertCards = (this.summary.alerts || []).length === 0
+    const tabs = `
+      <div class="flex items-center gap-1.5 mb-6 flex-wrap">
+        ${this._tab('overview',      'Visão Geral',  'fas fa-chart-pie')}
+        ${this._tab('products',      'Produtos',     'fas fa-box')}
+        ${this._tab('meta',          'Meta Ads',     'fab fa-meta')}
+        ${this._tab('google',        'Google Ads',   'fab fa-google')}
+        ${this._tab('integrations',  'Integrações',  'fas fa-plug')}
+      </div>`;
+
+    const content = this.loading
+      ? `<div class="py-12 text-center text-slate-500"><i class="fas fa-spinner animate-spin text-xl"></i></div>`
+      : this._renderTab();
+
+    return `
+      <div class="p-6 max-w-[1400px]">
+        <!-- Header -->
+        <div class="flex items-center gap-3 mb-6">
+          <button @click="$dispatch('navigate',{page:'projects'})"
+                  class="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all">
+            <i class="fas fa-arrow-left text-sm"></i>
+          </button>
+          <div class="w-10 h-10 rounded-xl flex-shrink-0" style="background:${p.color || '#3b82f6'};"></div>
+          <div class="flex-1 min-w-0">
+            <h2 class="text-xl font-bold text-white">${p.name}</h2>
+            <p class="text-sm text-slate-400">${p.client_name || 'Sem cliente'}</p>
+          </div>
+          <span class="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold"
+                style="background:${hColor}15; color:${hColor}; border:1px solid ${hColor}30;">
+            <i class="fas fa-heart-pulse"></i>
+            Saúde: ${this.health?.score ?? '–'}
+          </span>
+        </div>
+        ${tabs}
+        ${content}
+      </div>`;
+  },
+
+  _renderTab() {
+    switch (this.activeTab) {
+      case 'overview':      return this._tabOverview();
+      case 'products':      return this._tabProducts();
+      case 'meta':          return this._tabMeta();
+      case 'google':        return this._tabGoogle();
+      case 'integrations':  return this._tabIntegrations();
+      default:              return '';
+    }
+  },
+
+  _tabOverview() {
+    const hColor = this.health ? this.healthColor(this.health.status) : '#64748b';
+    const hScore = this.health?.score ?? '–';
+    const s = this.summary || {};
+
+    const alertCards = (this.alerts || []).length === 0
       ? `<p class="text-slate-500 text-sm py-4 text-center"><i class="fas fa-check-circle text-green-500 mr-2"></i>Sem alertas ativos</p>`
-      : (this.summary.alerts || []).map(a => `
+      : (this.alerts).map(a => `
           <div class="flex items-start gap-3 py-3 border-b last:border-0" style="border-color:rgba(51,65,85,0.3);">
-            <div class="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style="background:${a.severity==='critical'?'#ef4444':'#f59e0b'};"></div>
+            <div class="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style="background:${this.severityColor(a.severity)};"></div>
             <div class="flex-1 min-w-0">
               <p class="text-sm text-slate-200 leading-snug">${a.message || a.rule_name || 'Alerta'}</p>
               <p class="text-xs text-slate-500 mt-0.5">${a.created_at ? new Date(a.created_at).toLocaleDateString('pt-BR') : ''}</p>
             </div>
           </div>`).join('');
 
-    const taskCards = (this.summary.tasks || []).length === 0
+    const taskCards = (this.tasks || []).length === 0
       ? `<p class="text-slate-500 text-sm py-4 text-center"><i class="fas fa-circle-check text-slate-600 mr-2"></i>Sem tarefas pendentes</p>`
-      : (this.summary.tasks || []).map(t => `
+      : (this.tasks).map(t => `
           <div class="flex items-center gap-3 py-2.5 border-b last:border-0" style="border-color:rgba(51,65,85,0.3);">
-            <button @click="completeTask('${t.id}')" class="w-5 h-5 rounded-full border-2 border-slate-600 hover:border-green-500 transition-all flex-shrink-0"></button>
+            <div class="w-2 h-2 rounded-full flex-shrink-0" style="background:${{ high:'#ef4444',normal:'#64748b',low:'#22c55e' }[t.priority]||'#64748b'};"></div>
             <span class="text-sm text-slate-300 flex-1 truncate">${t.title}</span>
-            <span class="text-xs text-slate-500">${t.priority}</span>
           </div>`).join('');
 
     return `
-      <div class="p-6 max-w-4xl">
-        <div class="flex items-center gap-3 mb-6">
-          <button @click="$dispatch('navigate',{page:'projects'})" class="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all">
-            <i class="fas fa-arrow-left text-sm"></i>
-          </button>
-          <div class="w-10 h-10 rounded-xl flex-shrink-0" style="background:${p.color || '#3b82f6'};"></div>
-          <div class="flex-1 min-w-0">
-            <h2 class="text-xl font-bold text-white">${p.name}</h2>
-            <p class="text-sm text-slate-400">${p.client_name || 'Sem cliente definido'}</p>
-          </div>
-          <button @click="$dispatch('navigate',{page:'alerts'})"
-                  class="px-3 py-1.5 rounded-xl text-xs text-slate-300 border border-slate-700 hover:border-slate-500 transition-all">
-            <i class="fas fa-bell mr-1"></i>Alertas
-          </button>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+        <div class="rounded-2xl p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
+          <p class="text-xs text-slate-500 mb-1">Saúde</p>
+          <p class="text-2xl font-bold" style="color:${hColor};">${hScore}</p>
+          <p class="text-xs mt-0.5 text-slate-500">/ 100</p>
         </div>
-
-        <!-- Score de saúde + métricas -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-          <div class="rounded-2xl p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
-            <p class="text-xs text-slate-500 mb-1">Saúde</p>
-            <p class="text-2xl font-bold" style="color:${hColor};">${hScore}</p>
-            <p class="text-xs mt-0.5" style="color:${hColor};">${hLabel}</p>
-          </div>
-          <div class="rounded-2xl p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
-            <p class="text-xs text-slate-500 mb-1">Alertas</p>
-            <p class="text-2xl font-bold text-white">${this.summary.alert_count}</p>
-            <p class="text-xs text-slate-500 mt-0.5">ativos</p>
-          </div>
-          <div class="rounded-2xl p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
-            <p class="text-xs text-slate-500 mb-1">Tarefas</p>
-            <p class="text-2xl font-bold text-white">${this.summary.task_count}</p>
-            <p class="text-xs text-slate-500 mt-0.5">pendentes</p>
-          </div>
-          <div class="rounded-2xl p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
-            <p class="text-xs text-slate-500 mb-1">Contas</p>
-            <p class="text-2xl font-bold text-white">${this.summary.account_count}</p>
-            <p class="text-xs text-slate-500 mt-0.5">ativas</p>
-          </div>
+        <div class="rounded-2xl p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
+          <p class="text-xs text-slate-500 mb-1">Alertas</p>
+          <p class="text-2xl font-bold text-white">${s.alert_count ?? 0}</p>
+          <p class="text-xs text-slate-500 mt-0.5">ativos</p>
         </div>
-
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <!-- Alertas -->
-          <div class="rounded-2xl p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
-            <div class="flex items-center justify-between mb-3">
-              <p class="font-semibold text-white text-sm"><i class="fas fa-triangle-exclamation text-amber-400 mr-2"></i>Alertas Recentes</p>
-            </div>
-            ${alertCards}
+        <div class="rounded-2xl p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
+          <p class="text-xs text-slate-500 mb-1">Tarefas</p>
+          <p class="text-2xl font-bold text-white">${s.task_count ?? 0}</p>
+          <p class="text-xs text-slate-500 mt-0.5">pendentes</p>
+        </div>
+        <div class="rounded-2xl p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
+          <p class="text-xs text-slate-500 mb-1">Contas</p>
+          <p class="text-2xl font-bold text-white">${s.account_count ?? 0}</p>
+          <p class="text-xs text-slate-500 mt-0.5">Meta Ads</p>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="rounded-2xl p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
+          <div class="flex items-center justify-between mb-3">
+            <p class="font-semibold text-white text-sm"><i class="fas fa-triangle-exclamation text-amber-400 mr-2"></i>Alertas Recentes</p>
+            <button @click="loadTab('meta')" class="text-xs text-blue-400 hover:text-blue-300">Ver no Meta</button>
           </div>
-          <!-- Tarefas -->
-          <div class="rounded-2xl p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
-            <div class="flex items-center justify-between mb-3">
-              <p class="font-semibold text-white text-sm"><i class="fas fa-circle-check text-blue-400 mr-2"></i>Tarefas Pendentes</p>
-              <button @click="$dispatch('navigate',{page:'tasks'})" class="text-xs text-blue-400 hover:text-blue-300">Ver todas</button>
-            </div>
-            ${taskCards}
+          ${alertCards}
+        </div>
+        <div class="rounded-2xl p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
+          <div class="flex items-center justify-between mb-3">
+            <p class="font-semibold text-white text-sm"><i class="fas fa-circle-check text-blue-400 mr-2"></i>Tarefas Pendentes</p>
+            <button @click="$dispatch('navigate',{page:'tasks'})" class="text-xs text-blue-400 hover:text-blue-300">Ver todas</button>
           </div>
+          ${taskCards}
         </div>
       </div>`;
   },
 
-  async completeTask(tid) {
-    await API.post('/api/tasks/' + tid + '/complete', {});
-    await this.load();
-    toast('success', 'Tarefa concluída!');
+  _tabProducts() {
+    const form = this.showProductForm ? `
+      <div class="rounded-2xl p-5 mb-5" style="background:#1e293b; border:1px solid rgba(37,99,235,0.3);">
+        <p class="font-semibold text-white text-sm mb-4"><i class="fas fa-plus text-blue-400 mr-2"></i>Novo Produto</p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+          <input x-model="productForm.name" type="text" placeholder="Nome do produto *"
+                 class="px-3 py-2 rounded-xl text-sm text-white bg-slate-800 border border-slate-700 focus:border-blue-500 focus:outline-none sm:col-span-2" />
+          <input x-model="productForm.sku" type="text" placeholder="SKU / código"
+                 class="px-3 py-2 rounded-xl text-sm text-white bg-slate-800 border border-slate-700 focus:outline-none" />
+          <input x-model="productForm.price" type="number" step="0.01" placeholder="Preço (R$)"
+                 class="px-3 py-2 rounded-xl text-sm text-white bg-slate-800 border border-slate-700 focus:outline-none" />
+          <input x-model="productForm.category" type="text" placeholder="Categoria"
+                 class="px-3 py-2 rounded-xl text-sm text-white bg-slate-800 border border-slate-700 focus:outline-none" />
+          <input x-model="productForm.landing_url" type="url" placeholder="URL da landing page"
+                 class="px-3 py-2 rounded-xl text-sm text-white bg-slate-800 border border-slate-700 focus:outline-none" />
+          <textarea x-model="productForm.description" placeholder="Descrição (opcional)"
+                    rows="2" class="px-3 py-2 rounded-xl text-sm text-white bg-slate-800 border border-slate-700 focus:outline-none sm:col-span-2"></textarea>
+        </div>
+        <div class="flex gap-2">
+          <button @click="saveProduct()" :disabled="savingProduct"
+                  class="px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                  style="background:linear-gradient(135deg,#2563eb,#3b82f6);">
+            <i x-show="savingProduct" class="fas fa-spinner animate-spin mr-1"></i>Salvar
+          </button>
+          <button @click="showProductForm=false; productForm={name:'',description:'',sku:'',price:'',category:'',landing_url:''}"
+                  class="px-4 py-2 rounded-xl text-sm text-slate-400 border border-slate-700 hover:border-slate-500 transition-all">Cancelar</button>
+        </div>
+      </div>` : '';
+
+    const rows = this.products.length === 0
+      ? `<div class="flex flex-col items-center py-12 text-center">
+           <div class="w-12 h-12 rounded-2xl flex items-center justify-center mb-3" style="background:rgba(37,99,235,0.08);border:1px solid rgba(37,99,235,0.15);">
+             <i class="fas fa-box text-blue-400"></i>
+           </div>
+           <p class="font-semibold text-slate-300 mb-1">Nenhum produto</p>
+           <p class="text-sm text-slate-500 mb-4">Crie produtos manualmente ou importe do Notion</p>
+         </div>`
+      : `<table class="w-full text-sm">
+           <thead>
+             <tr class="text-left text-xs text-slate-500 border-b" style="border-color:rgba(51,65,85,0.5);">
+               <th class="pb-3 pr-4 font-medium">Nome</th>
+               <th class="pb-3 pr-4 font-medium hidden sm:table-cell">SKU</th>
+               <th class="pb-3 pr-4 font-medium hidden md:table-cell">Categoria</th>
+               <th class="pb-3 pr-4 font-medium">Preço</th>
+               <th class="pb-3 font-medium text-right"></th>
+             </tr>
+           </thead>
+           <tbody>
+             ${this.products.map(prod => `
+               <tr class="border-b hover:bg-slate-800/30 transition-all group" style="border-color:rgba(51,65,85,0.3);">
+                 <td class="py-3 pr-4">
+                   <p class="text-slate-200 font-medium">${prod.name}</p>
+                   ${prod.landing_url ? `<a href="${prod.landing_url}" target="_blank" class="text-xs text-blue-400 hover:underline truncate max-w-[200px] block">${prod.landing_url}</a>` : ''}
+                 </td>
+                 <td class="py-3 pr-4 text-slate-400 hidden sm:table-cell">${prod.sku || '—'}</td>
+                 <td class="py-3 pr-4 text-slate-400 hidden md:table-cell">${prod.category || '—'}</td>
+                 <td class="py-3 pr-4 text-slate-300">${prod.price ? 'R$ ' + Number(prod.price).toFixed(2) : '—'}</td>
+                 <td class="py-3 text-right">
+                   <button @click="deleteProduct('${prod.id}')"
+                           class="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-slate-600 hover:text-red-400 transition-all">
+                     <i class="fas fa-trash text-xs"></i>
+                   </button>
+                 </td>
+               </tr>`).join('')}
+           </tbody>
+         </table>`;
+
+    return `
+      <div class="flex items-center justify-between mb-4">
+        <p class="text-sm text-slate-400">${this.products.length} produto(s)</p>
+        <div class="flex gap-2">
+          <button @click="showProductForm = !showProductForm"
+                  class="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold text-white"
+                  style="background:linear-gradient(135deg,#2563eb,#3b82f6);">
+            <i class="fas fa-plus"></i>Novo Produto
+          </button>
+          <button @click="$dispatch('navigate',{page:'importar'})"
+                  class="px-3 py-2 rounded-xl text-sm text-slate-300 border border-slate-700 hover:border-slate-500 transition-all">
+            <i class="fas fa-file-import mr-1"></i>Importar
+          </button>
+        </div>
+      </div>
+      ${form}
+      <div class="rounded-2xl overflow-hidden p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
+        ${rows}
+      </div>`;
+  },
+
+  _tabMeta() {
+    // --- Contas de Anúncios ---
+    const accountsRows = this.accounts.length === 0
+      ? `<p class="text-slate-500 text-sm py-3 text-center">Nenhuma conta vinculada. <button class="text-blue-400 hover:underline" @click="$dispatch('navigate',{page:'accounts'})">Gerenciar contas</button></p>`
+      : this.accounts.map(a => `
+          <div class="flex items-center gap-3 py-3 border-b last:border-0" style="border-color:rgba(51,65,85,0.3);">
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:rgba(24,119,242,0.1);border:1px solid rgba(24,119,242,0.2);">
+              <i class="fab fa-meta text-blue-400 text-xs"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm text-slate-200 font-medium">${a.name}</p>
+              <p class="text-xs text-slate-500">${a.account_id} · ${a.country || ''}</p>
+            </div>
+            <span class="px-2 py-0.5 rounded-full text-xs font-medium"
+                  style="background:${a.status==='active'?'rgba(34,197,94,0.12)':'rgba(100,116,139,0.12)'}; color:${a.status==='active'?'#22c55e':'#64748b'};">
+              ${a.status === 'active' ? 'Ativa' : 'Pausada'}
+            </span>
+          </div>`).join('');
+
+    // --- Campanhas ---
+    const campaignRows = this.campaigns.length === 0
+      ? `<p class="text-slate-500 text-sm py-3 text-center">${this.accounts.length === 0 ? 'Vincule contas de anúncios para ver campanhas' : 'Nenhuma campanha encontrada'}</p>`
+      : this.campaigns.map(c => `
+          <div class="flex items-center gap-3 py-3 border-b last:border-0 group" style="border-color:rgba(51,65,85,0.3);">
+            <div class="flex-1 min-w-0">
+              <p class="text-sm text-slate-200 font-medium truncate">${c.name}</p>
+              <p class="text-xs text-slate-500">${c.account}</p>
+            </div>
+            <div class="hidden sm:flex items-center gap-4 text-xs text-slate-400">
+              <span title="Gasto">${this.fmtCurrency(c.spend)}</span>
+              <span title="ROAS">${this.fmtRoas(c.roas)} ROAS</span>
+            </div>
+            <span class="px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0"
+                  style="background:${c.status==='active'?'rgba(34,197,94,0.12)':'rgba(100,116,139,0.12)'}; color:${c.status==='active'?'#22c55e':'#64748b'};">
+              ${c.status === 'active' ? 'Ativa' : 'Pausada'}
+            </span>
+            <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              ${c.status === 'active'
+                ? `<button @click="pauseCampaign('${c.id}')" class="p-1.5 rounded-lg text-slate-500 hover:text-amber-400 hover:bg-amber-400/10 transition-all" title="Pausar"><i class="fas fa-pause text-xs"></i></button>`
+                : `<button @click="activateCampaign('${c.id}')" class="p-1.5 rounded-lg text-slate-500 hover:text-green-400 hover:bg-green-400/10 transition-all" title="Ativar"><i class="fas fa-play text-xs"></i></button>`}
+            </div>
+          </div>`).join('');
+
+    // --- Alertas Meta ---
+    const alertRows = this.alerts.length === 0
+      ? `<p class="text-slate-500 text-sm py-3 text-center"><i class="fas fa-check-circle text-green-500 mr-2"></i>Sem alertas ativos</p>`
+      : this.alerts.slice(0, 5).map(a => `
+          <div class="flex items-start gap-3 py-3 border-b last:border-0" style="border-color:rgba(51,65,85,0.3);">
+            <div class="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style="background:${this.severityColor(a.severity)};"></div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm text-slate-200">${a.message || a.rule_name || 'Alerta'}</p>
+              <p class="text-xs text-slate-500">${a.campaign_name || ''}</p>
+            </div>
+            <span class="text-xs px-2 py-0.5 rounded-full flex-shrink-0"
+                  style="background:${this.severityColor(a.severity)}15; color:${this.severityColor(a.severity)};">
+              ${a.severity}
+            </span>
+          </div>`).join('');
+
+    // --- BMs ---
+    const bmRows = this.bms.length === 0
+      ? `<p class="text-slate-500 text-sm py-3 text-center">Nenhum BM vinculado. <button class="text-blue-400 hover:underline" @click="$dispatch('navigate',{page:'bm'})">Gerenciar BMs</button></p>`
+      : this.bms.map(bm => `
+          <div class="flex items-center gap-3 py-3 border-b last:border-0" style="border-color:rgba(51,65,85,0.3);">
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:rgba(24,119,242,0.1);">
+              <i class="fas fa-building text-blue-400 text-xs"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm text-slate-200">${bm.name}</p>
+              <p class="text-xs text-slate-500">ID: ${bm.bm_id}</p>
+            </div>
+            <span class="w-2 h-2 rounded-full" style="background:${bm.status==='connected'?'#22c55e':'#ef4444'};"></span>
+          </div>`).join('');
+
+    return `
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+        <!-- Coluna esquerda: Contas + BMs -->
+        <div class="lg:col-span-1 space-y-4">
+          <div class="rounded-2xl p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
+            <div class="flex items-center justify-between mb-3">
+              <p class="font-semibold text-white text-sm"><i class="fab fa-meta text-blue-400 mr-2"></i>Contas de Anúncios</p>
+              <button @click="$dispatch('navigate',{page:'accounts'})" class="text-xs text-blue-400 hover:text-blue-300">Gerenciar</button>
+            </div>
+            ${accountsRows}
+          </div>
+          <div class="rounded-2xl p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
+            <div class="flex items-center justify-between mb-3">
+              <p class="font-semibold text-white text-sm"><i class="fas fa-building text-slate-400 mr-2"></i>Business Managers</p>
+              <button @click="$dispatch('navigate',{page:'bm'})" class="text-xs text-blue-400 hover:text-blue-300">Gerenciar</button>
+            </div>
+            ${bmRows}
+          </div>
+        </div>
+
+        <!-- Coluna direita: Campanhas + Alertas -->
+        <div class="lg:col-span-2 space-y-4">
+          <div class="rounded-2xl p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
+            <div class="flex items-center justify-between mb-3">
+              <p class="font-semibold text-white text-sm"><i class="fas fa-layer-group text-blue-400 mr-2"></i>Campanhas
+                <span class="ml-2 text-xs text-slate-500">${this.campaigns.length} encontrada(s)</span>
+              </p>
+              <button @click="$dispatch('navigate',{page:'campaigns'})" class="text-xs text-blue-400 hover:text-blue-300">Ver todas</button>
+            </div>
+            ${campaignRows}
+          </div>
+          <div class="rounded-2xl p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
+            <div class="flex items-center justify-between mb-3">
+              <p class="font-semibold text-white text-sm"><i class="fas fa-triangle-exclamation text-amber-400 mr-2"></i>Alertas Meta</p>
+              <button @click="$dispatch('navigate',{page:'alerts'})" class="text-xs text-blue-400 hover:text-blue-300">Ver todos</button>
+            </div>
+            ${alertRows}
+          </div>
+          <div class="rounded-2xl p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
+            <div class="flex items-center justify-between mb-3">
+              <p class="font-semibold text-white text-sm"><i class="fas fa-shield-halved text-purple-400 mr-2"></i>Regras Ativas
+                <span class="ml-2 text-xs text-slate-500">${(this.rules||[]).filter(r=>r.enabled).length} ativas</span>
+              </p>
+              <button @click="$dispatch('navigate',{page:'rules'})" class="text-xs text-blue-400 hover:text-blue-300">Gerenciar</button>
+            </div>
+            ${this.rules.length === 0
+              ? `<p class="text-slate-500 text-sm py-3 text-center">Nenhuma regra criada ainda</p>`
+              : this.rules.slice(0, 4).map(r => `
+                  <div class="flex items-center gap-3 py-2.5 border-b last:border-0" style="border-color:rgba(51,65,85,0.3);">
+                    <div class="w-2 h-2 rounded-full flex-shrink-0" style="background:${r.enabled ? '#22c55e' : '#64748b'};"></div>
+                    <p class="text-sm text-slate-300 flex-1 truncate">${r.name}</p>
+                    <span class="text-xs text-slate-500">${r.trigger_count || 0}x</span>
+                  </div>`).join('')}
+          </div>
+        </div>
+      </div>
+
+      <!-- Atalhos de ação Meta -->
+      <div class="flex flex-wrap gap-2 mt-4">
+        <button @click="$dispatch('navigate',{page:'agent'})"
+                class="px-3 py-2 rounded-xl text-sm text-slate-300 border border-slate-700 hover:border-purple-500/50 hover:text-purple-300 transition-all">
+          <i class="fas fa-robot mr-1"></i>Gestor IA
+        </button>
+        <button @click="$dispatch('navigate',{page:'quickactions'})"
+                class="px-3 py-2 rounded-xl text-sm text-slate-300 border border-slate-700 hover:border-amber-500/50 hover:text-amber-300 transition-all">
+          <i class="fas fa-bolt mr-1"></i>Ações em Massa
+        </button>
+        <button @click="$dispatch('navigate',{page:'reports'})"
+                class="px-3 py-2 rounded-xl text-sm text-slate-300 border border-slate-700 hover:border-blue-500/50 hover:text-blue-300 transition-all">
+          <i class="fas fa-file-chart-column mr-1"></i>Relatórios
+        </button>
+      </div>`;
+  },
+
+  _tabGoogle() {
+    return `
+      <div class="flex flex-col items-center py-16 text-center">
+        <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
+             style="background:rgba(66,133,244,0.08);border:1px solid rgba(66,133,244,0.2);">
+          <i class="fab fa-google text-2xl" style="color:#4285f4;"></i>
+        </div>
+        <p class="font-semibold text-slate-300 mb-2">Google Ads — Em breve</p>
+        <p class="text-sm text-slate-500 max-w-sm">A integração com Google Ads está sendo desenvolvida.<br>Em breve você poderá gerenciar campanhas, contas e métricas do Google aqui.</p>
+      </div>`;
+  },
+
+  _tabIntegrations() {
+    const form = this.integrations ? `
+      <div class="space-y-6">
+        <!-- Notion -->
+        <div class="rounded-2xl p-5" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);">
+              <i class="fas fa-n text-white text-sm"></i>
+            </div>
+            <div>
+              <p class="font-semibold text-white text-sm">Notion</p>
+              <p class="text-xs text-slate-500">Sincronize análises e produtos com o Notion</p>
+            </div>
+          </div>
+          <div class="space-y-3">
+            <div>
+              <label class="text-xs text-slate-400 block mb-1">Token de integração</label>
+              <input x-model="integrations.notion_token" type="password"
+                     placeholder="secret_..."
+                     class="w-full px-3 py-2 rounded-xl text-sm text-white bg-slate-800 border border-slate-700 focus:border-blue-500 focus:outline-none" />
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="text-xs text-slate-400 block mb-1">DB Análises Diárias (ID)</label>
+                <input x-model="integrations.notion_analyses_db_id" type="text"
+                       placeholder="ID da database"
+                       class="w-full px-3 py-2 rounded-xl text-sm text-white bg-slate-800 border border-slate-700 focus:outline-none" />
+              </div>
+              <div>
+                <label class="text-xs text-slate-400 block mb-1">DB Produtos (ID)</label>
+                <input x-model="integrations.notion_products_db_id" type="text"
+                       placeholder="ID da database"
+                       class="w-full px-3 py-2 rounded-xl text-sm text-white bg-slate-800 border border-slate-700 focus:outline-none" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ClickUp -->
+        <div class="rounded-2xl p-5" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:rgba(123,104,238,0.1);border:1px solid rgba(123,104,238,0.2);">
+              <i class="fas fa-circle-check text-purple-400 text-sm"></i>
+            </div>
+            <div>
+              <p class="font-semibold text-white text-sm">ClickUp</p>
+              <p class="text-xs text-slate-500">Importe tarefas e sincronize com o ClickUp</p>
+            </div>
+          </div>
+          <div class="space-y-3">
+            <div>
+              <label class="text-xs text-slate-400 block mb-1">Token pessoal</label>
+              <input x-model="integrations.clickup_token" type="password"
+                     placeholder="pk_..."
+                     class="w-full px-3 py-2 rounded-xl text-sm text-white bg-slate-800 border border-slate-700 focus:border-blue-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="text-xs text-slate-400 block mb-1">List ID padrão</label>
+              <input x-model="integrations.clickup_list_id" type="text"
+                     placeholder="ID da lista ClickUp"
+                     class="w-full px-3 py-2 rounded-xl text-sm text-white bg-slate-800 border border-slate-700 focus:outline-none" />
+            </div>
+          </div>
+        </div>
+
+        <div class="flex gap-2">
+          <button @click="saveIntegrations()"
+                  class="px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
+                  style="background:linear-gradient(135deg,#2563eb,#3b82f6);">
+            <i class="fas fa-check mr-2"></i>Salvar Integrações
+          </button>
+          <button @click="loadTab('integrations')"
+                  class="px-4 py-2 rounded-xl text-sm text-slate-300 border border-slate-700 hover:border-slate-500 transition-all">
+            <i class="fas fa-rotate-right mr-1"></i>Recarregar
+          </button>
+        </div>
+      </div>`
+      : `<div class="py-8 text-center text-slate-500"><i class="fas fa-spinner animate-spin text-xl"></i></div>`;
+
+    return form;
   },
 }));
 
@@ -310,11 +751,22 @@ Alpine.data('TasksPage', () => ({
     return { high: '#ef4444', normal: '#64748b', low: '#22c55e' }[p] || '#64748b';
   },
 
+  originBadge(origin) {
+    const map = {
+      'rule-engine': { label: 'Regra', color: '#ef4444' },
+      'ai-agent':    { label: 'IA',    color: '#a855f7' },
+      'ai-idea':     { label: 'Ideia', color: '#f59e0b' },
+      'alert':       { label: 'Alerta',color: '#f97316' },
+      'platform':    { label: 'Manual',color: '#64748b' },
+    };
+    const b = map[origin] || map['platform'];
+    return `<span class="px-1.5 py-0.5 rounded text-xs font-medium" style="background:${b.color}15; color:${b.color};">${b.label}</span>`;
+  },
+
   renderPage() {
     if (this.loading) return `<div class="p-8 text-center text-slate-500"><i class="fas fa-spinner animate-spin text-2xl"></i></div>`;
 
-    const projectOpts = this.projects.map(p =>
-      `<option value="${p.id}">${p.name}</option>`).join('');
+    const projectOpts = this.projects.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
 
     const formHtml = this.showForm ? `
       <div class="rounded-2xl p-5 mb-4" style="background:#1e293b; border:1px solid rgba(37,99,235,0.3);">
@@ -323,8 +775,7 @@ Alpine.data('TasksPage', () => ({
                  @keydown.enter="createTask()"
                  class="px-3 py-2 rounded-xl text-sm text-white bg-slate-800 border border-slate-700 focus:border-blue-500 focus:outline-none sm:col-span-2" />
           <select x-model="form.project_id" class="px-3 py-2 rounded-xl text-sm text-white bg-slate-800 border border-slate-700 focus:outline-none">
-            <option value="">Sem projeto</option>
-            ${projectOpts}
+            <option value="">Sem projeto</option>${projectOpts}
           </select>
           <select x-model="form.priority" class="px-3 py-2 rounded-xl text-sm text-white bg-slate-800 border border-slate-700 focus:outline-none">
             <option value="high">Alta prioridade</option>
@@ -340,29 +791,25 @@ Alpine.data('TasksPage', () => ({
                   style="background:linear-gradient(135deg,#2563eb,#3b82f6);">
             <i x-show="saving" class="fas fa-spinner animate-spin mr-1"></i>Salvar
           </button>
-          <button @click="showForm=false" class="px-4 py-2 rounded-xl text-sm text-slate-400 border border-slate-700 hover:border-slate-500 transition-all">
-            Cancelar
-          </button>
+          <button @click="showForm=false" class="px-4 py-2 rounded-xl text-sm text-slate-400 border border-slate-700 hover:border-slate-500 transition-all">Cancelar</button>
         </div>
       </div>` : '';
 
     const rows = this.filtered.length === 0
-      ? `<div class="empty-state">
-           <div class="empty-state-icon"><i class="fas fa-circle-check"></i></div>
+      ? `<div class="empty-state"><div class="empty-state-icon"><i class="fas fa-circle-check"></i></div>
            <p class="font-semibold text-slate-300 mb-1">Nenhuma tarefa encontrada</p>
-           <p class="text-sm text-slate-500 mb-4">Crie sua primeira tarefa ou ajuste os filtros</p>
-         </div>`
+           <p class="text-sm text-slate-500 mb-4">Crie sua primeira tarefa ou ajuste os filtros</p></div>`
       : this.filtered.map(t => `
           <div class="flex items-center gap-3 px-4 py-3 rounded-xl transition-all hover:bg-slate-800/40 group"
                style="border-bottom:1px solid rgba(51,65,85,0.3);">
             <button @click="completeTask('${t.id}')"
-                    class="w-5 h-5 rounded-full border-2 border-slate-600 hover:border-green-500 flex-shrink-0 transition-all"
-                    title="Marcar como feita"></button>
+                    class="w-5 h-5 rounded-full border-2 border-slate-600 hover:border-green-500 flex-shrink-0 transition-all"></button>
             <div class="flex-1 min-w-0">
               <p class="text-sm text-slate-200 truncate">${t.title}</p>
               ${t.project_id ? `<p class="text-xs text-slate-500">${this.projectName(t.project_id)}</p>` : ''}
             </div>
-            <span class="w-2 h-2 rounded-full flex-shrink-0" style="background:${this.priorityColor(t.priority)};" title="${t.priority}"></span>
+            ${this.originBadge(t.origin)}
+            <span class="w-2 h-2 rounded-full flex-shrink-0" style="background:${this.priorityColor(t.priority)};"></span>
             ${t.due_date ? `<span class="text-xs text-slate-500 hidden sm:block">${t.due_date}</span>` : ''}
             <button @click="deleteTask('${t.id}')"
                     class="opacity-0 group-hover:opacity-100 p-1 rounded-lg text-slate-600 hover:text-red-400 transition-all">
@@ -384,7 +831,6 @@ Alpine.data('TasksPage', () => ({
           </button>
         </div>
         ${formHtml}
-        <!-- Filtros -->
         <div class="flex gap-2 mb-4 flex-wrap">
           <select x-model="filterStatus" class="px-3 py-1.5 rounded-xl text-xs text-slate-300 bg-slate-800 border border-slate-700 focus:outline-none">
             <option value="open">Abertas</option>
@@ -392,8 +838,7 @@ Alpine.data('TasksPage', () => ({
             <option value="">Todas</option>
           </select>
           <select x-model="filterProject" class="px-3 py-1.5 rounded-xl text-xs text-slate-300 bg-slate-800 border border-slate-700 focus:outline-none">
-            <option value="">Todos os projetos</option>
-            ${projectOpts}
+            <option value="">Todos os projetos</option>${projectOpts}
           </select>
         </div>
         <div class="rounded-2xl overflow-hidden" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
@@ -404,7 +849,7 @@ Alpine.data('TasksPage', () => ({
 }));
 
 
-// ── IntegrationsPage ─────────────────────────────────────────────────────────
+// ── IntegrationsPage — ferramentas externas (Notion/ClickUp/etc.) ─────────────
 Alpine.data('IntegrationsPage', () => ({
   health: null,
   loading: false,
@@ -423,65 +868,81 @@ Alpine.data('IntegrationsPage', () => ({
     return `
       <div class="p-6">
         <div class="mb-6">
-          <h2 class="text-xl font-bold text-white">Integrações</h2>
-          <p class="text-sm text-slate-400">Meta, Google, TikTok, ClickUp, Notion</p>
+          <h2 class="text-xl font-bold text-white">Integrações Externas</h2>
+          <p class="text-sm text-slate-400">Conecte o Ads Hub com ferramentas de gestão</p>
         </div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-          ${this._connectionCard('Meta Ads', 'fab fa-meta', '#1877f2', 'meta')}
-          ${this._connectionCard('Google Ads', 'fab fa-google', '#4285f4', 'google')}
-          ${this._connectionCard('TikTok Ads', 'fab fa-tiktok', '#010101', 'tiktok')}
-          ${this._connectionCard('ClickUp', 'fas fa-circle-check', '#7b68ee', 'clickup')}
-          ${this._connectionCard('Notion', 'fas fa-n', '#ffffff', 'notion')}
-          ${this._connectionCard('Google Sheets', 'fas fa-table', '#34a853', 'sheets')}
+
+        <!-- Ferramentas de gestão -->
+        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Ferramentas de Gestão</p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+          ${this._card('Notion', 'fas fa-n', '#ffffff', 'notion',
+            'Sincronize análises, produtos e resultados com bases Notion por projeto.',
+            'Configurar por projeto →', 'project-detail')}
+          ${this._card('ClickUp', 'fas fa-circle-check', '#7b68ee', 'clickup',
+            'Importe tarefas do ClickUp e exporte decisões do Gestor IA.',
+            'Configurar por projeto →', 'project-detail')}
+          ${this._card('Google Sheets', 'fas fa-table', '#34a853', 'sheets',
+            'Importe produtos via planilha Google Sheets e lance campanhas.',
+            'Ir para Lançador →', 'importar')}
         </div>
-        <div class="flex gap-2">
-          <button @click="$dispatch('navigate',{page:'connections'})"
-                  class="px-4 py-2 rounded-xl text-sm text-slate-300 border border-slate-700 hover:border-slate-500 transition-all">
-            <i class="fas fa-plug mr-2"></i>Configurar tokens Meta
-          </button>
-          <button @click="$dispatch('navigate',{page:'settings'})"
-                  class="px-4 py-2 rounded-xl text-sm text-slate-300 border border-slate-700 hover:border-slate-500 transition-all">
-            <i class="fas fa-gear mr-2"></i>Configurações gerais
-          </button>
-          <button @click="load()"
-                  class="px-4 py-2 rounded-xl text-sm text-slate-300 border border-slate-700 hover:border-slate-500 transition-all">
-            <i class="fas fa-rotate-right mr-2"></i>Verificar saúde
-          </button>
+
+        <!-- Plataformas de mídia -->
+        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Plataformas de Mídia</p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          ${this._card('Meta Ads', 'fab fa-meta', '#1877f2', 'meta',
+            'Gerencie Business Managers, contas de anúncios e campanhas.',
+            'Gerenciar tokens →', 'connections')}
+          ${this._card('Google Ads', 'fab fa-google', '#4285f4', 'google',
+            'Integração com Google Ads — em desenvolvimento.',
+            'Em breve', null)}
+          ${this._card('TikTok Ads', 'fab fa-tiktok', '#000000', 'tiktok',
+            'Integração com TikTok Ads — em desenvolvimento.',
+            'Em breve', null)}
         </div>
       </div>`;
   },
 
-  _connectionCard(name, icon, color, key) {
-    const metaBms = this.health?.meta_bms || [];
-    let status = 'idle', statusLabel = 'Não configurado', statusColor = '#64748b';
-    if (key === 'meta' && metaBms.length > 0) {
-      const ok = metaBms.every(b => b.ok);
-      status = ok ? 'ok' : 'error';
-      statusLabel = ok ? `${metaBms.length} BM(s) conectado(s)` : 'Erro em algum token';
+  _card(name, icon, color, key, desc, action, targetPage) {
+    const health = this.health;
+    let statusLabel = 'Não configurado', statusColor = '#64748b';
+    if (key === 'meta' && health?.meta_bms?.length > 0) {
+      const ok = health.meta_bms.every(b => b.ok);
+      statusLabel = ok ? `${health.meta_bms.length} BM(s) conectado(s)` : 'Erro em algum token';
       statusColor = ok ? '#22c55e' : '#ef4444';
-    } else if (key === 'notion' && this.health?.notion) {
-      status = this.health.notion.ok ? 'ok' : 'error';
-      statusLabel = this.health.notion.ok ? 'Conectado' : 'Token inválido';
-      statusColor = this.health.notion.ok ? '#22c55e' : '#ef4444';
-    } else if (key === 'clickup' && this.health?.clickup) {
-      status = this.health.clickup.ok ? 'ok' : 'error';
-      statusLabel = this.health.clickup.ok ? 'Conectado' : 'Token inválido';
-      statusColor = this.health.clickup.ok ? '#22c55e' : '#ef4444';
-    } else if (['google','tiktok'].includes(key)) {
-      statusLabel = 'Em breve';
+    } else if (key === 'notion' && health?.notion) {
+      statusLabel = health.notion.ok ? 'Conectado' : 'Token inválido';
+      statusColor = health.notion.ok ? '#22c55e' : '#ef4444';
+    } else if (key === 'clickup' && health?.clickup) {
+      statusLabel = health.clickup.ok ? 'Conectado' : 'Token inválido';
+      statusColor = health.clickup.ok ? '#22c55e' : '#ef4444';
     }
+
+    const btn = targetPage
+      ? `<button @click="$dispatch('navigate',{page:'${targetPage}'})"
+                 class="mt-4 w-full px-3 py-2 rounded-xl text-xs text-center text-slate-400 border border-slate-700 hover:border-slate-500 hover:text-white transition-all">
+           ${action}
+         </button>`
+      : `<div class="mt-4 px-3 py-2 rounded-xl text-xs text-center text-slate-600 border border-slate-800">
+           ${action}
+         </div>`;
+
     return `
-      <div class="rounded-2xl p-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
+      <div class="rounded-2xl p-5 flex flex-col" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
         <div class="flex items-center gap-3 mb-3">
-          <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:${color}20; border:1px solid ${color}30;">
+          <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+               style="background:${color}18; border:1px solid ${color}25;">
             <i class="${icon} text-sm" style="color:${color};"></i>
           </div>
-          <p class="font-semibold text-white text-sm">${name}</p>
+          <div class="flex-1 min-w-0">
+            <p class="font-semibold text-white text-sm">${name}</p>
+            <div class="flex items-center gap-1.5 mt-0.5">
+              <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style="background:${statusColor};"></span>
+              <span class="text-xs text-slate-400">${statusLabel}</span>
+            </div>
+          </div>
         </div>
-        <div class="flex items-center gap-1.5">
-          <span class="w-2 h-2 rounded-full flex-shrink-0" style="background:${statusColor};"></span>
-          <span class="text-xs text-slate-400">${statusLabel}</span>
-        </div>
+        <p class="text-xs text-slate-500 flex-1">${desc}</p>
+        ${btn}
       </div>`;
   },
 }));
@@ -516,13 +977,8 @@ Alpine.data('IntelligencePage', () => ({
     this.loading = false;
   },
 
-  riskColor(level) {
-    return { low: '#22c55e', warning: '#f59e0b', critical: '#ef4444' }[level] || '#64748b';
-  },
-
-  riskLabel(level) {
-    return { low: 'Baixo', warning: 'Médio', critical: 'Alto' }[level] || '-';
-  },
+  riskColor(level) { return { low: '#22c55e', warning: '#f59e0b', critical: '#ef4444' }[level] || '#64748b'; },
+  riskLabel(level) { return { low: 'Baixo', warning: 'Médio', critical: 'Alto' }[level] || '-'; },
 
   renderPage() {
     const projectOpts = this.projects.map(p =>
@@ -535,17 +991,14 @@ Alpine.data('IntelligencePage', () => ({
         <div class="rounded-2xl p-5" style="background:#1e293b; border:1px solid rgba(51,65,85,0.5);">
           <div class="flex items-center justify-between mb-4">
             <p class="font-semibold text-white text-sm"><i class="fas fa-shield-halved mr-2" style="color:${color};"></i>Score de Risco</p>
-            <span class="px-2 py-0.5 rounded-full text-xs font-semibold"
-                  style="background:${color}20; color:${color};">
-              ${this.riskLabel(this.risk.level)}
-            </span>
+            <span class="px-2 py-0.5 rounded-full text-xs font-semibold" style="background:${color}20; color:${color};">${this.riskLabel(this.risk.level)}</span>
           </div>
           <div class="flex items-end gap-3 mb-4">
             <p class="text-4xl font-bold" style="color:${color};">${this.risk.score ?? '-'}</p>
             <p class="text-slate-500 text-sm mb-1">/100</p>
           </div>
           <div class="w-full rounded-full h-2 mb-4" style="background:rgba(51,65,85,0.6);">
-            <div class="h-2 rounded-full transition-all" style="width:${this.risk.score ?? 0}%; background:${color};"></div>
+            <div class="h-2 rounded-full" style="width:${this.risk.score ?? 0}%; background:${color};"></div>
           </div>
           <div class="space-y-2">
             <div class="flex justify-between text-xs">
@@ -557,7 +1010,6 @@ Alpine.data('IntelligencePage', () => ({
               <span class="text-white font-medium">${this.risk.factors?.warning_alerts ?? 0}</span>
             </div>
           </div>
-          ${this.risk.message ? `<p class="text-xs text-slate-500 mt-3 pt-3 border-t" style="border-color:rgba(51,65,85,0.4);">${this.risk.message}</p>` : ''}
         </div>`;
     })() : '';
 
@@ -588,8 +1040,7 @@ Alpine.data('IntelligencePage', () => ({
         </div>
         ${this.loading ? '<div class="p-8 text-center text-slate-500"><i class="fas fa-spinner animate-spin text-2xl"></i></div>' : `
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-          ${riskCard}
-          ${forecastCard}
+          ${riskCard}${forecastCard}
         </div>
         <div class="flex gap-2">
           <button @click="$dispatch('navigate',{page:'analysis'})"
@@ -608,6 +1059,7 @@ Alpine.data('IntelligencePage', () => ({
 
 // ── AutomationPage ───────────────────────────────────────────────────────────
 Alpine.data('AutomationPage', () => ({
+  async init() {},
   renderPage() {
     return `
       <div class="p-6">
@@ -664,7 +1116,6 @@ Alpine.data('AutomationPage', () => ({
         </div>
       </div>`;
   },
-  async init() {},
 }));
 
 }); // alpine:init

@@ -405,3 +405,90 @@ def project_health(pid: str):
         "warning_alerts": warning_alerts,
         "overdue_tasks": overdue_tasks,
     }
+
+
+@router.get("/api/projects/{pid}/accounts")
+def project_accounts(pid: str):
+    """Contas de anúncios vinculadas a este projeto."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM ad_accounts WHERE project_id=? ORDER BY name", (pid,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@router.post("/api/projects/{pid}/accounts/{account_id}/assign")
+def assign_account(pid: str, account_id: str):
+    """Vincula uma conta de anúncios a este projeto."""
+    conn = get_db()
+    conn.execute("UPDATE ad_accounts SET project_id=? WHERE id=?", (pid, account_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.post("/api/projects/{pid}/accounts/{account_id}/unassign")
+def unassign_account(pid: str, account_id: str):
+    """Remove vínculo de conta com este projeto."""
+    conn = get_db()
+    conn.execute("UPDATE ad_accounts SET project_id='' WHERE id=?", (account_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.get("/api/projects/{pid}/campaigns")
+def project_campaigns(pid: str, period: str = "last_7d"):
+    """Campanhas Meta Ads das contas vinculadas a este projeto."""
+    conn = get_db()
+    accounts = conn.execute(
+        "SELECT * FROM ad_accounts WHERE project_id=? AND status='active'", (pid,)
+    ).fetchall()
+    conn.close()
+    if not accounts:
+        return []
+    from backend.integrations.meta_client import fetch_meta_campaigns, fetch_meta_insights
+    from backend.domains.accounts import _EMPTY_METRICS
+    all_campaigns = []
+    for acc in accounts:
+        acc_d = dict(acc)
+        try:
+            meta_camps = fetch_meta_campaigns(acc_d["account_id"], acc_d["access_token"])
+        except Exception:
+            continue
+        for mc in meta_camps:
+            try:
+                ins = fetch_meta_insights(mc["id"], acc_d["access_token"], period)
+            except Exception:
+                ins = {}
+            camp = {
+                "id": mc["id"],
+                "name": mc["name"],
+                "account": acc_d["name"],
+                "account_id": acc_d["id"],
+                "status": mc.get("status", "").lower(),
+                **{k: ins.get(k, 0) for k in _EMPTY_METRICS},
+            }
+            all_campaigns.append(camp)
+    return all_campaigns
+
+
+@router.get("/api/projects/{pid}/bms")
+def project_bms(pid: str):
+    """Business Managers vinculados a este projeto."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM business_managers WHERE project_id=? ORDER BY name", (pid,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@router.get("/api/projects/{pid}/rules")
+def project_rules(pid: str):
+    """Regras de automação — retorna todas (regras são globais por enquanto)."""
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM rules ORDER BY created_at DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

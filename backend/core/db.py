@@ -367,6 +367,23 @@ def init_db():
         except Exception:
             pass  # Column already exists
 
+    # Products table (marketing products per project)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS products (
+            id TEXT PRIMARY KEY,
+            project_id TEXT DEFAULT '',
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            sku TEXT DEFAULT '',
+            price REAL DEFAULT 0,
+            category TEXT DEFAULT '',
+            status TEXT DEFAULT 'active',
+            landing_url TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+    conn.commit()
+
     # Migration: assign orphaned BMs/accounts (no project_id) to a default project
     try:
         _migrate_orphaned_to_default_project(conn)

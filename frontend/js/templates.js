@@ -2491,7 +2491,7 @@ settings(s) {
               <i class="fas fa-chart-line text-white text-3xl"></i>
             </div>
             <div>
-              <h2 class="text-white font-bold text-2xl">Meta Ads Control Center</h2>
+              <h2 class="text-white font-bold text-2xl">Ads Hub</h2>
               <p class="text-blue-400 font-medium">v1.0.0</p>
             </div>
             <p class="text-slate-400 text-sm max-w-md mx-auto">Plataforma profissional de gestão de campanhas Meta Ads. Monitore, analise e otimize suas campanhas em tempo real.</p>
