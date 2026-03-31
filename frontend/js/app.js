@@ -155,6 +155,8 @@ Alpine.data('App', () => ({
 
   async refreshData() {
     this.loading = true;
+    // Limpa cache do dashboard para forçar nova busca na Meta API
+    await API.del('/api/dashboard/cache');
     await this.$store.meta.refresh();
     const alerts = await API.get('/api/alerts');
     if (alerts) this.alertCount = alerts.filter(a => a.status === 'active').length;
@@ -303,9 +305,10 @@ Alpine.data('Dashboard', () => ({
     this._clockInterval = setInterval(() => { this.clockTick++; }, 1000);
   },
 
-  async fetchDashboard() {
+  async fetchDashboard(force = false) {
     this.loading = true;
-    const data = await API.get(`/api/dashboard?period=${this.period}&view_by=${this.viewBy}`);
+    const url = `/api/dashboard?period=${this.period}&view_by=${this.viewBy}${force ? '&force=true' : ''}`;
+    const data = await API.get(url);
     this.apiData = data || {};
     const rawTs = (data && data.time_series) || [];
     this.ts = {
@@ -553,10 +556,10 @@ Alpine.data('Dashboard', () => ({
           <input type="date" x-model="customFrom" class="form-input" style="width:140px;" />
           <span class="text-slate-500 text-xs">até</span>
           <input type="date" x-model="customTo" class="form-input" style="width:140px;" />
-          <button @click="fetchDashboard()" class="btn btn-primary btn-sm">Aplicar</button>
+          <button @click="fetchDashboard(true)" class="btn btn-primary btn-sm">Aplicar</button>
         </div>
-        <button @click="fetchDashboard()" class="btn btn-primary btn-sm whitespace-nowrap ml-auto">
-          <i class="fas fa-rotate-right"></i> Atualizar
+        <button @click="fetchDashboard(true)" class="btn btn-primary btn-sm whitespace-nowrap ml-auto">
+          <i class="fas fa-rotate-right" :class="loading ? 'animate-spin' : ''"></i> Atualizar
         </button>
       </div>
 

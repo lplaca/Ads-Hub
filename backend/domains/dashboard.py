@@ -17,11 +17,11 @@ _dashboard_cache = {"data": None, "ts": 0}
 _PERIOD_DAYS = {"today": 1, "yesterday": 1, "last_7d": 7, "last_14d": 14, "last_30d": 30, "last_90d": 90}
 
 
-def _fetch_all_campaigns_cached(ttl: int = 300):
+def _fetch_all_campaigns_cached(ttl: int = 300, force: bool = False):
     """Fetch all campaigns with insights, cached for `ttl` seconds."""
     import time as _time
     now = _time.time()
-    if _dashboard_cache["data"] is not None and (now - _dashboard_cache["ts"]) < ttl:
+    if not force and _dashboard_cache["data"] is not None and (now - _dashboard_cache["ts"]) < ttl:
         return _dashboard_cache["data"]
 
     conn = get_db()
@@ -86,8 +86,16 @@ def get_stats():
     }
 
 
+@router.delete("/api/dashboard/cache")
+def clear_dashboard_cache():
+    """Force-clear the dashboard campaign cache."""
+    _dashboard_cache["data"] = None
+    _dashboard_cache["ts"] = 0
+    return {"ok": True}
+
+
 @router.get("/api/dashboard")
-def get_dashboard(period: str = "last_7d", view_by: str = "account"):
+def get_dashboard(period: str = "last_7d", view_by: str = "account", force: bool = False):
     conn = get_db()
     acc_count = conn.execute("SELECT COUNT(*) FROM ad_accounts").fetchone()[0]
     conn.close()
@@ -104,7 +112,7 @@ def get_dashboard(period: str = "last_7d", view_by: str = "account"):
         }
 
     # ── Real mode — aggregate from Meta API ─────────────────────────────────
-    campaigns = _fetch_all_campaigns_cached()
+    campaigns = _fetch_all_campaigns_cached(force=force)
     total_spend = sum(c.get("spend", 0) for c in campaigns)
     total_conv = sum(c.get("conversions", 0) for c in campaigns)
     total_revenue = sum(c.get("revenue", 0) for c in campaigns)
