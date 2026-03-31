@@ -454,7 +454,7 @@ Alpine.data('Dashboard', () => ({
           <!-- Picker modal overlay -->
           <div x-show="clockPickerOpen" @click="clockPickerOpen=false"
                x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
-               class="fixed inset-0 z-[200] flex items-center justify-center p-4"
+               class="fixed inset-0 z-[9999] flex items-center justify-center p-4"
                style="display:none;background:rgba(0,0,0,0.65);backdrop-filter:blur(4px);">
             <div @click.stop class="w-full max-w-sm rounded-2xl shadow-2xl"
                  style="background:rgba(15,23,42,0.99);border:1px solid rgba(59,130,246,0.25);">

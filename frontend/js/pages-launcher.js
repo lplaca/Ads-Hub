@@ -476,7 +476,7 @@ Alpine.data('ImportarPage', () => ({
 </div>
 
 <!-- ── LAUNCH MODAL ── -->
-<div x-show="launchModal" x-transition class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+<div x-show="launchModal" x-transition class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
   <div class="glass rounded-2xl w-full max-w-lg p-6 space-y-5">
     <div class="flex items-center justify-between">
       <h3 class="text-white font-bold text-lg"><i class="fas fa-rocket text-green-400 mr-2"></i>Lançando Campanha</h3>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Meta Ads Control Center</title>
+  <title>Ads Hub</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232563eb'/><path d='M8 22 L12 10 L16 18 L20 10 L24 22' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
 
   <!-- Tailwind CSS -->
@@ -91,7 +91,7 @@
       sidebarOpen || !isMobile ? 'translate-x-0' : '-translate-x-full'
     ]"
     class="fixed lg:relative z-30 flex flex-col h-full transition-all duration-300 ease-in-out"
-    style="background: rgba(15,23,42,0.97); backdrop-filter: blur(24px); border-right: 1px solid rgba(51,65,85,0.5);"
+    style="background: rgba(13,20,36,0.99); border-right: 1px solid rgba(51,65,85,0.5);"
   >
     <!-- Logo + Project Switcher -->
     <div x-data="ProjectSwitcher" x-init="init()" class="flex-shrink-0" style="border-bottom: 1px solid rgba(51,65,85,0.4);">
@@ -101,8 +101,8 @@
           <i class="fas fa-chart-line text-white text-sm"></i>
         </div>
         <div x-show="!sidebarCollapsed" x-transition:enter="transition-opacity duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100">
-          <p class="text-white font-bold text-sm leading-tight whitespace-nowrap">Meta Ads</p>
-          <p class="text-blue-400 text-xs font-medium whitespace-nowrap">Control Center</p>
+          <p class="text-white font-bold text-sm leading-tight whitespace-nowrap">Ads Hub</p>
+          <p class="text-blue-400 text-xs font-medium whitespace-nowrap">Centro Operacional</p>
         </div>
       </div>
       <!-- Project picker (only when expanded) -->
@@ -137,88 +137,6 @@
         </div>
       </div>
 
-      <!-- Project Modal -->
-      <div x-show="showModal" x-transition class="fixed inset-0 z-[200] flex items-center justify-center p-4" style="background:rgba(0,0,0,0.75); display:none;">
-        <div class="w-full max-w-sm rounded-2xl overflow-hidden" style="background:#1e293b; border:1px solid rgba(51,65,85,0.6); max-height:90vh; overflow-y:auto;" @click.stop>
-          <!-- Header -->
-          <div class="flex items-center justify-between p-5 pb-0">
-            <h3 class="font-bold text-white" x-text="editId ? 'Editar Projeto' : 'Novo Projeto'"></h3>
-            <button @click="showModal=false" class="text-slate-500 hover:text-white transition-colors"><i class="fas fa-times"></i></button>
-          </div>
-          <div class="p-5 space-y-4">
-            <!-- Name -->
-            <div>
-              <label class="text-xs text-slate-400 block mb-1">Nome do projeto</label>
-              <input x-model="form.name" type="text" placeholder="Ex: GTS, Hot, Ondelta..." @keydown.enter="save()"
-                class="w-full px-3 py-2 rounded-xl text-sm text-white bg-slate-800 border border-slate-700 focus:border-blue-500 focus:outline-none" />
-            </div>
-            <!-- Color -->
-            <div>
-              <label class="text-xs text-slate-400 block mb-2">Cor</label>
-              <div class="flex gap-2 flex-wrap">
-                <template x-for="c in COLORS" :key="c">
-                  <button @click="form.color=c" class="w-7 h-7 rounded-lg transition-all" :style="'background:'+c+(form.color===c?';outline:2px solid white;outline-offset:2px':'')" ></button>
-                </template>
-              </div>
-            </div>
-            <!-- Integrations toggle -->
-            <button @click="showIntegrations=!showIntegrations" class="w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm text-slate-400 transition-colors" style="background:rgba(51,65,85,0.4); border:1px solid rgba(51,65,85,0.5);">
-              <span class="flex items-center gap-2"><i class="fas fa-plug text-xs"></i> Integrações (Notion / ClickUp)</span>
-              <i class="fas text-xs transition-transform" :class="showIntegrations ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
-            </button>
-            <!-- Integrations fields -->
-            <div x-show="showIntegrations" x-transition class="space-y-3 pt-1">
-              <p class="text-xs text-slate-500">Configure para sincronizar análises diárias deste projeto.</p>
-              <!-- Notion -->
-              <div class="rounded-xl p-3 space-y-2" style="background:rgba(30,41,59,0.8); border:1px solid rgba(51,65,85,0.4);">
-                <p class="text-xs font-semibold text-slate-300 flex items-center gap-1.5"><i class="fas fa-book text-purple-400"></i> Notion</p>
-                <div>
-                  <label class="text-xs text-slate-500 block mb-1">Token de integração</label>
-                  <input x-model="integrations.notion_token" type="password" placeholder="secret_..."
-                    class="w-full px-3 py-2 rounded-lg text-xs text-white bg-slate-800 border border-slate-700 focus:border-purple-500 focus:outline-none" />
-                </div>
-                <div>
-                  <label class="text-xs text-slate-500 block mb-1">ID — Análises Diárias (banco de dados)</label>
-                  <input x-model="integrations.notion_analyses_db_id" type="text" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                    class="w-full px-3 py-2 rounded-lg text-xs text-white bg-slate-800 border border-slate-700 focus:border-purple-500 focus:outline-none" />
-                </div>
-                <div>
-                  <label class="text-xs text-slate-500 block mb-1">ID — Produtos (banco de dados, opcional)</label>
-                  <input x-model="integrations.notion_products_db_id" type="text" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                    class="w-full px-3 py-2 rounded-lg text-xs text-white bg-slate-800 border border-slate-700 focus:border-purple-500 focus:outline-none" />
-                </div>
-              </div>
-              <!-- ClickUp -->
-              <div class="rounded-xl p-3 space-y-2" style="background:rgba(30,41,59,0.8); border:1px solid rgba(51,65,85,0.4);">
-                <p class="text-xs font-semibold text-slate-300 flex items-center gap-1.5"><i class="fas fa-check-circle text-pink-400"></i> ClickUp</p>
-                <div>
-                  <label class="text-xs text-slate-500 block mb-1">API Token</label>
-                  <input x-model="integrations.clickup_token" type="password" placeholder="pk_..."
-                    class="w-full px-3 py-2 rounded-lg text-xs text-white bg-slate-800 border border-slate-700 focus:border-pink-500 focus:outline-none" />
-                </div>
-                <div>
-                  <label class="text-xs text-slate-500 block mb-1">List ID</label>
-                  <input x-model="integrations.clickup_list_id" type="text" placeholder="123456789"
-                    class="w-full px-3 py-2 rounded-lg text-xs text-white bg-slate-800 border border-slate-700 focus:border-pink-500 focus:outline-none" />
-                </div>
-              </div>
-            </div>
-            <!-- Error feedback -->
-            <div x-show="saveError" class="px-3 py-2 rounded-xl text-xs text-red-300 flex items-center gap-2" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);display:none;">
-              <i class="fas fa-triangle-exclamation flex-shrink-0"></i>
-              <span x-text="saveError"></span>
-            </div>
-            <!-- Actions -->
-            <div class="flex gap-2 pt-1">
-              <button @click="showModal=false; saveError=''" class="flex-1 py-2 rounded-xl text-sm text-slate-400 border border-slate-700 hover:border-slate-500">Cancelar</button>
-              <button @click="save()" :disabled="saving" class="flex-1 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50" style="background:#2563eb;">
-                <i x-show="saving" class="fas fa-spinner animate-spin mr-1"></i>
-                <span x-text="saving ? 'Salvando...' : 'Salvar'"></span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- Nav Items -->
@@ -306,7 +224,7 @@
   </aside>
 
   <!-- ── MAIN AREA ────────────────────────────────────────────────────────── -->
-  <div class="flex-1 flex flex-col min-w-0 overflow-x-hidden">
+  <div class="flex-1 flex flex-col min-w-0" style="overflow-x:clip;">
 
     <!-- ── HEADER ───────────────────────────────────────────────────────── -->
     <header class="flex-shrink-0 px-4 py-3" style="position:sticky;top:0;z-index:50;background:rgba(15,23,42,0.9);backdrop-filter:blur(16px);border-bottom:1px solid rgba(51,65,85,0.4);min-height:64px;">
@@ -406,7 +324,7 @@
                 <p class="text-slate-400 text-xs truncate" x-text="user?.email || ''"></p>
               </div>
               <div class="p-1">
-                <button @click="showProfile=true; open=false" class="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-slate-300 hover:bg-slate-700/50 hover:text-white transition-colors">
+                <button @click="openProfileModal(); open=false" class="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-slate-300 hover:bg-slate-700/50 hover:text-white transition-colors">
                   <i class="fas fa-user-pen w-4 text-slate-400"></i> Editar perfil
                 </button>
                 <button @click="$dispatch('navigate',{page:'settings'}); open=false" class="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-slate-300 hover:bg-slate-700/50 hover:text-white transition-colors">
@@ -419,31 +337,6 @@
               </div>
             </div>
 
-            <!-- Edit Profile Modal -->
-            <div x-show="showProfile" x-transition class="fixed inset-0 z-[200] flex items-center justify-center p-4" style="background:rgba(0,0,0,0.7); display:none;">
-              <div class="w-full max-w-sm rounded-2xl p-5 space-y-4" style="background:#1e293b; border:1px solid rgba(51,65,85,0.6);" @click.stop>
-                <h3 class="font-bold text-white">Editar Perfil</h3>
-                <div>
-                  <label class="text-xs text-slate-400 block mb-1">Nome</label>
-                  <input x-model="form.name" type="text" class="w-full px-3 py-2 rounded-xl text-sm text-white bg-slate-800 border border-slate-700 focus:border-blue-500 focus:outline-none" />
-                </div>
-                <div>
-                  <label class="text-xs text-slate-400 block mb-1">Email</label>
-                  <input x-model="form.email" type="email" class="w-full px-3 py-2 rounded-xl text-sm text-white bg-slate-800 border border-slate-700 focus:border-blue-500 focus:outline-none" />
-                </div>
-                <div class="border-t pt-3" style="border-color:rgba(51,65,85,0.4);">
-                  <p class="text-xs text-slate-500 mb-2">Alterar senha (opcional)</p>
-                  <input x-model="form.current_password" type="password" placeholder="Senha atual" class="w-full px-3 py-2 rounded-xl text-sm text-white bg-slate-800 border border-slate-700 focus:border-blue-500 focus:outline-none mb-2" />
-                  <input x-model="form.new_password" type="password" placeholder="Nova senha" class="w-full px-3 py-2 rounded-xl text-sm text-white bg-slate-800 border border-slate-700 focus:border-blue-500 focus:outline-none" />
-                </div>
-                <div class="flex gap-2 pt-1">
-                  <button @click="showProfile=false; form.current_password=''; form.new_password=''" class="flex-1 py-2 rounded-xl text-sm text-slate-400 border border-slate-700 hover:border-slate-500">Cancelar</button>
-                  <button @click="saveProfile()" :disabled="saving" class="flex-1 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50" style="background:#2563eb;">
-                    <span x-text="saving ? 'Salvando...' : 'Salvar'"></span>
-                  </button>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -565,11 +458,73 @@
     </main><!-- /main -->
   </div><!-- /main area -->
 
-  <!-- ══ MODALS LAYER ════════════════════════════════════════════════════ -->
-  <!-- Modals are rendered by each page component via Alpine magic -->
+  <!-- ══ MODAL ROOT ═══════════════════════════════════════════════════════ -->
+  <!-- Modais renderizam aqui — fora de qualquer backdrop-filter/transform  -->
+  <div id="modal-root">
+
+    <div x-data
+         x-show="$store.projectModal.open"
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+         x-transition:leave="transition ease-in duration-150"
+         x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-[500] flex items-center justify-center p-4"
+         style="background:rgba(0,0,0,0.75); display:none;"
+         @click.self="$store.projectModal.close()">
+      <div class="w-full max-w-sm rounded-2xl p-5 space-y-4"
+           style="background:#1e293b; border:1px solid rgba(51,65,85,0.6); box-shadow:0 25px 60px rgba(0,0,0,0.5);"
+           @click.stop>
+        <div class="flex items-center justify-between">
+          <h3 class="font-bold text-white text-base"
+              x-text="$store.projectModal.editId ? 'Editar Projeto' : 'Novo Projeto'"></h3>
+          <button @click="$store.projectModal.close()" class="text-slate-500 hover:text-white p-1">
+            <i class="fas fa-times text-sm"></i>
+          </button>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-slate-400 block mb-1.5">Nome do projeto</label>
+          <input x-model="$store.projectModal.form.name" type="text"
+                 placeholder="Ex: GTS, Ondelta, LAÉRA..."
+                 @keydown.enter="$store.projectModal.submit()"
+                 class="w-full px-3 py-2.5 rounded-xl text-sm text-white bg-slate-800/80 border border-slate-700 focus:border-blue-500 focus:outline-none transition-all" />
+        </div>
+        <div>
+          <label class="text-xs font-medium text-slate-400 block mb-2">Cor do projeto</label>
+          <div class="flex gap-2 flex-wrap">
+            <template x-for="c in $store.projectModal.COLORS" :key="c">
+              <button @click="$store.projectModal.form.color = c"
+                      class="w-8 h-8 rounded-lg transition-all hover:scale-110"
+                      :style="'background:'+c+($store.projectModal.form.color===c?';outline:2px solid white;outline-offset:2px':'')">
+              </button>
+            </template>
+          </div>
+        </div>
+        <div x-show="$store.projectModal.error"
+             class="px-3 py-2 rounded-lg text-xs text-red-300"
+             style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3);">
+          <i class="fas fa-triangle-exclamation mr-1"></i>
+          <span x-text="$store.projectModal.error"></span>
+        </div>
+        <div class="flex gap-2 pt-1">
+          <button @click="$store.projectModal.close()"
+                  class="flex-1 py-2.5 rounded-xl text-sm text-slate-400 border border-slate-700 hover:border-slate-500 transition-all">
+            Cancelar
+          </button>
+          <button @click="$store.projectModal.submit()"
+                  :disabled="$store.projectModal.saving"
+                  class="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                  style="background:linear-gradient(135deg,#2563eb,#3b82f6);">
+            <i x-show="$store.projectModal.saving" class="fas fa-spinner animate-spin mr-1"></i>
+            <span x-text="$store.projectModal.saving ? 'Salvando...' : 'Salvar'"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /#modal-root -->
 
   <!-- ══ TOAST NOTIFICATIONS ═════════════════════════════════════════════ -->
-  <div class="fixed top-4 right-4 z-[200] flex flex-col gap-2 pointer-events-none" style="max-width:360px;">
+  <div class="fixed top-4 right-4 z-[99999] flex flex-col gap-2 pointer-events-none" style="max-width:360px;">
     <template x-for="toast in toasts" :key="toast.id">
       <div
         x-show="toast.visible"
@@ -601,6 +556,38 @@
 <!-- ══════════════════════════════════════════════════════════════════════════ -->
 <!--  SCRIPTS                                                                    -->
 <!-- ══════════════════════════════════════════════════════════════════════════ -->
+<script>
+document.addEventListener('alpine:init', () => {
+  Alpine.store('projectModal', {
+    open: false, editId: null, saving: false, error: '',
+    form: { name: '', color: '#3b82f6' },
+    COLORS: ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#f97316','#14b8a6','#a855f7'],
+    _onSave: null,
+    show(opts = {}) {
+      this.editId = opts.editId || null;
+      this.form = { name: opts.name || '', color: opts.color || '#3b82f6' };
+      this.error = ''; this.saving = false; this._onSave = opts.onSave || null; this.open = true;
+      setTimeout(() => document.querySelector('#modal-root input')?.focus(), 150);
+    },
+    close() { this.open = false; this.error = ''; },
+    async submit() {
+      if (!this.form.name.trim()) { this.error = 'Nome obrigatório.'; return; }
+      this.saving = true; this.error = '';
+      try {
+        const result = this.editId
+          ? await API.put('/api/projects/' + this.editId, this.form)
+          : await API.post('/api/projects', this.form);
+        if (!result) { this.error = 'Erro ao salvar. Tente novamente.'; this.saving = false; return; }
+        this.open = false;
+        if (typeof this._onSave === 'function') this._onSave(result);
+        window.dispatchEvent(new CustomEvent('project-changed'));
+        window.dispatchEvent(new CustomEvent('page-refresh'));
+      } catch(e) { this.error = e?.message || 'Erro inesperado.'; }
+      this.saving = false;
+    },
+  });
+});
+</script>
 <script src="/static/js/app.js?v=3"></script>
 <script src="/static/js/templates.js?v=3"></script>
 <script src="/static/js/agent.js?v=3"></script>

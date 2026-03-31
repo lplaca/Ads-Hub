@@ -1,8 +1,8 @@
 """
-Meta Ads Control Center - Backend API
+Ads Hub - Backend API
 FastAPI + SQLite - Serves frontend + API
 """
-import os, json, uuid, random, requests as http_req, threading, time, hashlib, secrets, hmac, base64
+import os, json, uuid, requests as http_req, threading, time, hashlib, secrets, hmac, base64
 import smtplib, ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -94,7 +94,7 @@ if DATABASE_URL:
         def close(self): self._conn.close()
 META_API = "https://graph.facebook.com/v19.0"
 
-app = FastAPI(title="Meta Ads Control Center", version="2.0.0")
+app = FastAPI(title="Ads Hub", version="2.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -939,20 +939,12 @@ def _sync_bm_accounts(bm_row_id: str, bm_id: str, token: str, conn, project_id: 
     return count
 
 def gen_time_series(days=7):
-    data = []
-    base_inv = random.uniform(1500, 2500)
-    base_conv = random.randint(30, 60)
-    for i in range(days):
-        d = datetime.now() - timedelta(days=days - i - 1)
-        inv = round(base_inv * random.uniform(0.7, 1.3), 2)
-        conv = int(base_conv * random.uniform(0.7, 1.3))
-        data.append({
-            "date": d.strftime("%d/%m"),
-            "invest": inv,
-            "conversions": conv,
-            "roas": round(conv * 35 / inv, 2) if inv > 0 else 0,
-        })
-    return data
+    """Retorna slots zerados para os últimos N dias. Dados reais vêm da API de cada plataforma."""
+    return [
+        {"date": (datetime.now() - timedelta(days=days - i - 1)).strftime("%d/%m"),
+         "invest": 0.0, "conversions": 0, "roas": 0.0}
+        for i in range(days)
+    ]
 
 # ─── RULE ENGINE ───────────────────────────────────────────────────────────────
 
@@ -1105,7 +1097,7 @@ def run_rules_engine() -> dict:
 
 # ─── AI RULE PARSER ────────────────────────────────────────────────────────────
 
-AI_RULE_SYSTEM = """Você é um assistente especialista em Meta Ads. O usuário vai descrever uma regra de automação em linguagem natural e você deve convertê-la em JSON estruturado.
+AI_RULE_SYSTEM = """Você é um assistente especialista em tráfego pago (Meta Ads, Google Ads, TikTok Ads). O usuário vai descrever uma regra de automação em linguagem natural e você deve convertê-la em JSON estruturado.
 
 Métricas disponíveis:
 - spend: gasto em dólares
@@ -2331,7 +2323,7 @@ def get_db_knowledge() -> list:
     return [dict(r) for r in rows]
 
 def build_agent_system_prompt(products: list, knowledge: list, autonomy: int = 1) -> str:
-    prompt = """Você é um gestor de tráfego pago especialista em Meta Ads com anos de experiência gerenciando campanhas de alto volume e ROI. Você trabalha 24/7 analisando campanhas, protegendo orçamento e identificando oportunidades.
+    prompt = """Você é um gestor de tráfego pago especialista em Meta Ads, Google Ads e TikTok Ads com anos de experiência gerenciando campanhas de alto volume e ROI. Você trabalha 24/7 analisando campanhas, protegendo orçamento e identificando oportunidades.
 
 Seu trabalho é:
 1. Analisar as métricas das campanhas ativas e identificar problemas
@@ -3097,7 +3089,7 @@ def serve_frontend(full_path: str = ""):
 def startup():
     init_db()
     print("\n" + "="*50)
-    print("  Meta Ads Control Center v2")
+    print("  Ads Hub v2.1")
     print("  http://localhost:8000")
     print("="*50 + "\n")
 
@@ -4189,7 +4181,7 @@ def _build_alert_email_html(alerts: list, campaigns: list) -> str:
 
     <!-- Footer -->
     <div style="padding:16px 28px;border-top:1px solid #334155;">
-      <p style="margin:0;color:#475569;font-size:11px;text-align:center;">Meta Ads Control Center — Alerta automático</p>
+      <p style="margin:0;color:#475569;font-size:11px;text-align:center;">Ads Hub — Alerta automático</p>
     </div>
   </div>
 </body>
@@ -4243,7 +4235,7 @@ def test_alert_email(data: dict = {}):
         <p>Configuração de email funcionando! Você receberá alertas de campanhas neste endereço.</p>
         <p style="color:#64748b;font-size:12px;">{datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
     </div>"""
-    result = _send_email(to_addr, "Teste — Meta Ads Control Center", html, s)
+    result = _send_email(to_addr, "Teste — Ads Hub", html, s)
     return result
 
 

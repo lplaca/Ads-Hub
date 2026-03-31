@@ -83,33 +83,34 @@ Alpine.data('AuthGate', () => ({
   error:   '',
 
   async init() {
-    const status = await fetch('/api/auth/status').then(r => r.json()).catch(() => null);
+    const fetchWithRetry = async (url, opts = {}, maxAttempts = 4) => {
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 15000);
+          const r = await fetch(url, { ...opts, signal: ctrl.signal });
+          clearTimeout(timer);
+          if (r.ok) return r.json();
+          if (r.status === 401) return null;
+        } catch(e) {
+          if (attempt < maxAttempts) await new Promise(res => setTimeout(res, attempt * 1000));
+        }
+      }
+      return null;
+    };
+
+    const status = await fetchWithRetry('/api/auth/status');
     if (!status) { this.mode = 'login'; this.checked = true; this.authed = false; return; }
 
-    if (!status.has_users) {
-      // No users at all — show setup
-      this.mode = 'setup';
-      this.checked = true;
-      this.authed = false;
-      return;
-    }
+    if (!status.has_users) { this.mode = 'setup'; this.checked = true; this.authed = false; return; }
 
-    // Check if already logged in
     const token = Auth.getToken();
     if (token) {
-      const me = await fetch('/api/auth/me', { headers: { 'X-Auth-Token': token } })
-        .then(r => r.ok ? r.json() : null).catch(() => null);
-      if (me) {
-        this.authed = true;
-        this.checked = true;
-        return;
-      }
+      const me = await fetchWithRetry('/api/auth/me', { headers: { 'X-Auth-Token': token } }, 3);
+      if (me) { this.authed = true; this.checked = true; return; }
       Auth.clearSession();
     }
-
-    this.mode = 'login';
-    this.checked = true;
-    this.authed = false;
+    this.mode = 'login'; this.checked = true; this.authed = false;
   },
 
   async submit() {
@@ -147,8 +148,8 @@ Alpine.data('AuthGate', () => ({
           <div class="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4" style="background: linear-gradient(135deg, #2563eb, #3b82f6); box-shadow: 0 8px 32px rgba(59,130,246,0.4);">
             <i class="fas fa-chart-line text-white text-2xl"></i>
           </div>
-          <h1 class="text-2xl font-bold text-white">Meta Ads</h1>
-          <p class="text-blue-400 text-sm font-medium">Control Center</p>
+          <h1 class="text-2xl font-bold text-white">Ads Hub</h1>
+          <p class="text-blue-400 text-sm font-medium">Centro Operacional</p>
         </div>
 
         <!-- Card -->
@@ -234,63 +235,17 @@ Alpine.data('ProjectSwitcher', () => ({
   },
 
   openCreate() {
-    this.editId = null;
-    this.form = { name: '', color: '#3b82f6' };
-    this.integrations = { notion_token: '', notion_analyses_db_id: '', notion_products_db_id: '', clickup_token: '', clickup_list_id: '' };
-    this.showIntegrations = false;
-    this.showModal = true;
+    Alpine.store('projectModal').show({ onSave: () => this.load() });
   },
 
-  async openEdit(p) {
-    this.editId = p.id;
-    this.form = { name: p.name, color: p.color };
-    this.showIntegrations = false;
-    const intg = await API.get(`/api/projects/${p.id}/integrations`);
-    this.integrations = intg || { notion_token: '', notion_analyses_db_id: '', notion_products_db_id: '', clickup_token: '', clickup_list_id: '' };
-    this.showModal = true;
+  openEdit(p) {
+    Alpine.store('projectModal').show({
+      editId: p.id, name: p.name, color: p.color,
+      onSave: () => this.load(),
+    });
   },
 
-  async save() {
-    if (!this.form.name.trim()) return;
-    this.saving = true;
-    this.saveError = '';
-    try {
-      let pid = this.editId;
-      if (pid) {
-        await API.put(`/api/projects/${pid}`, this.form);
-        // Update in-place optimistically
-        const idx = this.projects.findIndex(p => p.id === pid);
-        if (idx >= 0) this.projects[idx] = { ...this.projects[idx], name: this.form.name, color: this.form.color };
-      } else {
-        const res = await API.post('/api/projects', this.form);
-        if (!res?.id) throw new Error('Servidor não retornou o projeto criado. Tente novamente.');
-        pid = res.id;
-        // Immediately add to list and activate — don't wait for GET
-        const newProj = { id: pid, name: this.form.name, color: this.form.color, is_active: true };
-        this.projects = [...this.projects.map(p => ({...p, is_active: false})), newProj];
-        this.active = newProj;
-      }
-      // Save integrations if any field is filled
-      const hasIntg = Object.values(this.integrations).some(v => v && v.trim());
-      if (pid && hasIntg) {
-        await API.put(`/api/projects/${pid}/integrations`, this.integrations);
-      }
-      this.showModal = false;
-      this.saveError = '';
-      this.form = { name: '', color: '#3b82f6' };
-      // Sync in background — don't await so UI is already updated
-      this.load().then(() => {
-        window.dispatchEvent(new CustomEvent('project-changed'));
-        window.dispatchEvent(new CustomEvent('page-refresh'));
-      });
-      toast('success', this.editId ? 'Projeto atualizado!' : 'Projeto criado!');
-    } catch(e) {
-      this.saveError = e?.message || 'Erro ao salvar. Tente novamente.';
-      toast('error', this.saveError);
-    } finally {
-      this.saving = false;
-    }
-  },
+  async save() { Alpine.store('projectModal').submit(); },
 
   async remove(pid) {
     if (!confirm('Remover este projeto? As contas continuarão existindo.')) return;

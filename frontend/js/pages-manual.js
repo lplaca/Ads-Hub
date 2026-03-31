@@ -27,6 +27,12 @@ Alpine.data('ManualPage', () => ({
     { id:'knowledge',    label:'Base de Conhecimento',    icon:'fas fa-brain',            group:'Gestor IA' },
     { id:'chat',         label:'Chat com a IA',           icon:'fas fa-comments',         group:'Gestor IA' },
     { id:'ideas',        label:'Ideias & Estratégias',    icon:'fas fa-lightbulb',        group:'Gestor IA' },
+    { id:'projects',             label:'Projetos',                    icon:'fas fa-folder-open',      group:'Projetos & Integrações' },
+    { id:'project_integrations', label:'Configurar Notion / ClickUp', icon:'fas fa-plug',             group:'Projetos & Integrações' },
+    { id:'sync_notion',          label:'Puxar Dados do Notion',       icon:'fas fa-book',             group:'Projetos & Integrações' },
+    { id:'sync_clickup',         label:'Puxar Tarefas do ClickUp',    icon:'fas fa-check-circle',     group:'Projetos & Integrações' },
+    { id:'auto_products',        label:'Criar Produtos por País',     icon:'fas fa-wand-magic-sparkles', group:'Projetos & Integrações' },
+    { id:'session_secret',       label:'Sessão Persistente (Render)', icon:'fas fa-shield-halved',    group:'Projetos & Integrações' },
     { id:'rules',        label:'Regras de Automação',     icon:'fas fa-shield-halved',    group:'Automação' },
     { id:'alerts',       label:'Alertas',                 icon:'fas fa-bell',             group:'Automação' },
     { id:'dashboard',    label:'Dashboard',               icon:'fas fa-chart-pie',        group:'Análise' },
@@ -178,6 +184,12 @@ Alpine.data('ManualPage', () => ({
       n8n_configure:    () => this.sN8nConfigure(),
       n8n_test:         () => this.sN8nTest(),
       troubleshoot: () => this.sTroubleshoot(),
+      projects:             () => this.sProjects(),
+      project_integrations: () => this.sProjectIntegrations(),
+      sync_notion:          () => this.sSyncNotion(),
+      sync_clickup:         () => this.sSyncClickup(),
+      auto_products:        () => this.sAutoProducts(),
+      session_secret:       () => this.sSessionSecret(),
     }
     return (map[id] || map['inicio'])()
   },
@@ -1839,6 +1851,229 @@ Alpine.data('ManualPage', () => ({
   ).join('')}
 
   ${this.tip('Para que a plataforma inicie automaticamente com o Windows, consulte como adicionar um script ao "Iniciar com o Windows" ou use um gerenciador de processos como NSSM.')}
+</div>`
+  },
+
+  // ════════════════════════════════════════════════════════════════════════
+  // PROJETOS & INTEGRAÇÕES
+  // ════════════════════════════════════════════════════════════════════════
+
+  sProjects() {
+    return `
+<div>
+  ${this.h2('Projetos', 'fas fa-folder-open')}
+  ${this.p('Projetos são a unidade principal de organização da plataforma. Cada projeto agrupa seus próprios Business Managers, contas de anúncio, Notion e ClickUp — tudo isolado dos demais projetos.')}
+
+  ${this.h3('Para que serve um projeto?')}
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
+    ${[
+      ['Isolamento', 'BMs e contas de um projeto não aparecem em outro. Dados 100% separados.'],
+      ['Múltiplos clientes', 'Gerencie vários clientes ou marcas na mesma plataforma sem misturar dados.'],
+      ['Integração própria', 'Cada projeto conecta seu próprio Notion ou ClickUp independente.'],
+    ].map(([t,d]) => `<div class="bg-gray-800/50 rounded-lg p-4"><p class="text-white text-sm font-semibold mb-1">${t}</p><p class="text-gray-400 text-xs">${d}</p></div>`).join('')}
+  </div>
+
+  ${this.h3('Criar um projeto')}
+  ${this.step(1, 'Clique no seletor de projeto', 'No topo da barra lateral, clique na área que mostra o projeto ativo (com o ícone de pasta). Um dropdown abre com todos os projetos.')}
+  ${this.step(2, 'Clique em "Novo Projeto"', 'Um modal abre. Preencha o nome (ex: GTS, Ondelta, Cliente X) e escolha uma cor para identificação visual.')}
+  ${this.step(3, 'Expanda "Integrações" (opcional)', 'Ainda no mesmo modal, clique no botão <strong>"Integrações (Notion / ClickUp)"</strong> para já configurar a conexão do projeto. Pode fazer depois também.')}
+  ${this.step(4, 'Clique em Salvar', 'O projeto é criado e automaticamente ativado. Tudo que você fizer agora pertence a ele.')}
+  ${this.ok('Ao criar um projeto, ele é ativado imediatamente. O nome na barra lateral muda para refletir o projeto ativo.')}
+
+  ${this.h3('Trocar de projeto')}
+  ${this.step(1, 'Clique no seletor', 'O dropdown mostra todos os projetos. O ativo tem um indicador colorido à esquerda.')}
+  ${this.step(2, 'Clique no projeto desejado', 'A plataforma recarrega os dados (BMs, contas, campanhas) do projeto selecionado automaticamente.')}
+  ${this.tip('Ao trocar de projeto, todas as páginas (Dashboard, Contas, Campanhas, etc.) mostram apenas os dados daquele projeto. Não há mistura.')}
+
+  ${this.h3('Editar ou remover um projeto')}
+  ${this.p('No dropdown de projetos, cada projeto tem ícones de editar (lápis) e remover (lixeira):')}
+  ${['<strong>Editar</strong>: altera o nome, cor e integrações do projeto.', '<strong>Remover</strong>: apaga o projeto. <em>As contas de anúncio continuam existindo</em>, mas ficam sem projeto vinculado.'].map(i => `<div class="flex items-start gap-2 text-sm text-gray-300 mb-2"><i class="fas fa-arrow-right text-purple-400 mt-1 flex-shrink-0 text-xs"></i>${i}</div>`).join('')}
+  ${this.warn('Remover um projeto não apaga os BMs ou contas de anúncio — eles ficam "soltos" e podem ser migrados para outro projeto.')}
+</div>`
+  },
+
+  sProjectIntegrations() {
+    return `
+<div>
+  ${this.h2('Configurar Notion / ClickUp por Projeto', 'fas fa-plug')}
+  ${this.p('Cada projeto pode ter sua própria conexão independente com o Notion e o ClickUp. Assim, projetos de clientes diferentes apontam para workspaces/listas diferentes.')}
+
+  ${this.h3('Acessar as configurações de integração')}
+  ${this.step(1, 'Abra o seletor de projetos', 'Clique no nome do projeto ativo na barra lateral.')}
+  ${this.step(2, 'Clique no ícone de editar', 'O lápis ao lado do projeto abre o modal de edição.')}
+  ${this.step(3, 'Clique em "Integrações (Notion / ClickUp)"', 'O painel expande mostrando os campos de token e ID para Notion e ClickUp.')}
+  ${this.step(4, 'Preencha os campos e salve', 'As integrações são salvas junto com as demais configurações do projeto ao clicar em Salvar.')}
+
+  ${this.h3('Campos do Notion')}
+  <div class="space-y-3 mb-5">
+    ${[
+      ['Token de integração', 'secret_...', 'Gerado em notion.so/my-integrations. Crie uma integração, copie o token Internal Integration Secret.'],
+      ['ID — Análises Diárias', 'xxxxxxxx...', 'ID do banco de dados onde as análises diárias serão salvas. Veja como obter o ID abaixo.'],
+      ['ID — Produtos (opcional)', 'xxxxxxxx...', 'ID do banco de dados de produtos. Usado para puxar produtos do Notion para a plataforma.'],
+    ].map(([label, placeholder, desc]) => `
+    <div class="bg-gray-800/40 rounded-lg p-3">
+      <p class="text-white text-sm font-semibold">${label} <code class="text-green-400 text-xs font-mono ml-1">${placeholder}</code></p>
+      <p class="text-gray-400 text-xs mt-1">${desc}</p>
+    </div>`).join('')}
+  </div>
+
+  ${this.h3('Como obter o ID de um banco de dados Notion')}
+  ${this.step(1, 'Abra o banco de dados no Notion', 'Navegue até a database desejada (ex: Análises Diárias).')}
+  ${this.step(2, 'Copie a URL', 'A URL terá o formato: <code class="text-green-400 text-xs">notion.so/workspace/<strong>abc123def456...</strong>?v=...</code>')}
+  ${this.step(3, 'Extraia o ID', 'O ID é a sequência de 32 caracteres hexadecimais antes do <code class="text-xs text-green-400">?v=</code>. Ex: <code class="text-xs text-green-400">94732954e8dd4cc4b80a6a2a95b3d8e1</code>')}
+  ${this.tip('Você pode colar a URL completa no campo — a plataforma aceita o ID no formato com ou sem hífens.')}
+
+  ${this.h3('Campos do ClickUp')}
+  <div class="space-y-3 mb-5">
+    ${[
+      ['API Token', 'pk_...', 'Obtido em: ClickUp → Configurações pessoais → Apps → API Token.'],
+      ['List ID', '901322010985', 'O ID da lista onde as tarefas estão. Aparece na URL: app.clickup.com/TEAM/v/li/<strong>ID_AQUI</strong>'],
+    ].map(([label, placeholder, desc]) => `
+    <div class="bg-gray-800/40 rounded-lg p-3">
+      <p class="text-white text-sm font-semibold">${label} <code class="text-green-400 text-xs font-mono ml-1">${placeholder}</code></p>
+      <p class="text-gray-400 text-xs mt-1">${desc}</p>
+    </div>`).join('')}
+  </div>
+
+  ${this.h3('Compartilhar o banco de dados com a integração Notion')}
+  ${this.step(1, 'Abra o banco de dados no Notion', 'Clique nos três pontos "..." no canto superior direito.')}
+  ${this.step(2, 'Clique em "Connections" (Conexões)', 'Procure por "Add connections" ou "Conectar a".')}
+  ${this.step(3, 'Selecione sua integração', 'Escolha a integração criada em notion.so/my-integrations. Sem esse passo, a plataforma recebe erro 403.')}
+  ${this.danger('Se a integração não tiver acesso ao banco de dados, as sincronizações vão falhar com erro de permissão. Faça esse passo para cada banco de dados que for usar.')}
+</div>`
+  },
+
+  sSyncNotion() {
+    return `
+<div>
+  ${this.h2('Puxar Dados do Notion', 'fas fa-book')}
+  ${this.p('A plataforma pode importar produtos cadastrados no seu banco de dados Notion diretamente para a lista de Produtos da IA. Assim você mantém os dados no Notion e sincroniza quando precisar.')}
+
+  ${this.h3('Pré-requisito')}
+  ${this.p('O projeto ativo precisa ter o <strong>Token Notion</strong> e o <strong>ID do banco de dados de Produtos</strong> configurados. Veja a seção <strong>Configurar Notion / ClickUp por Projeto</strong>.')}
+
+  ${this.h3('Como puxar os produtos')}
+  ${this.step(1, 'Vá em Configurações', 'Menu lateral → <strong>Configurações</strong>.')}
+  ${this.step(2, 'Abra a aba "Integrações"', 'Clique na aba Integrações no topo da página.')}
+  ${this.step(3, 'Localize o painel "Sincronizar Projeto Ativo"', 'O painel no topo mostra o projeto ativo e o status de cada integração (Conectado / Não config.).')}
+  ${this.step(4, 'Clique em "Puxar Produtos" (roxo)', 'O botão Notion — Produtos dispara a importação. Aguarde a confirmação.')}
+  ${this.ok('Aparecerá a mensagem "X produto(s) importado(s)" em verde quando concluído.')}
+
+  ${this.h3('O que é importado')}
+  <div class="overflow-x-auto mb-4">
+    <table class="w-full text-xs text-gray-300 border-collapse">
+      <thead><tr class="border-b border-gray-700">${['Campo Notion','Campo na Plataforma','Obs'].map(h=>`<th class="text-left py-2 px-3 text-gray-400 font-semibold">${h}</th>`).join('')}</tr></thead>
+      <tbody>${[
+        ['Produto / Nome / Name', 'Nome do produto', 'Obrigatório. Sem ele, o registro é ignorado.'],
+        ['CPA Alvo / CPA Target', 'CPA Alvo', 'Meta de custo por aquisição para a IA'],
+        ['ROAS Alvo / ROAS Target', 'ROAS Alvo', 'Meta de retorno sobre gasto para a IA'],
+        ['Ticket Médio / Ticket', 'Ticket Médio', 'Ticket médio do produto'],
+        ['Status, Plataforma, CPA Máximo, Breakeven', 'Observações', 'Concatenados no campo notas'],
+      ].map(([a,b,c])=>`<tr class="border-b border-gray-800"><td class="py-2 px-3">${a}</td><td class="py-2 px-3 text-purple-300">${b}</td><td class="py-2 px-3 text-gray-400">${c}</td></tr>`).join('')}</tbody>
+    </table>
+  </div>
+
+  ${this.h3('Regra de atualização')}
+  ${this.p('Se um produto com o mesmo nome já existe na plataforma, ele é <strong>atualizado</strong> (CPA, ROAS, Ticket, Notas). Se não existe, é <strong>criado</strong>. A comparação de nome é case-insensitive.')}
+  ${this.tip('Rode a sincronização sempre que atualizar metas ou dados dos produtos no Notion. A plataforma não sincroniza automaticamente — é sempre manual por segurança.')}
+</div>`
+  },
+
+  sSyncClickup() {
+    return `
+<div>
+  ${this.h2('Puxar Tarefas do ClickUp', 'fas fa-check-circle')}
+  ${this.p('A plataforma importa as tarefas de uma lista ClickUp como <strong>Ideias & Estratégias</strong>. Isso permite usar o ClickUp como fonte de idéias de campanha, testes e estratégias de tráfego.')}
+
+  ${this.h3('Pré-requisito')}
+  ${this.p('O projeto ativo precisa ter o <strong>API Token ClickUp</strong> e o <strong>List ID</strong> configurados. Veja a seção <strong>Configurar Notion / ClickUp por Projeto</strong>.')}
+
+  ${this.h3('Como puxar as tarefas')}
+  ${this.step(1, 'Vá em Configurações → Integrações', 'Menu lateral → Configurações → aba Integrações.')}
+  ${this.step(2, 'Clique em "Puxar Tarefas" (rosa)', 'O botão ClickUp — Tarefas dispara a importação das tasks da lista configurada.')}
+  ${this.step(3, 'Confirme o resultado', 'Aparecerá "X tarefa(s) importada(s)". Vá em Gestor IA → Ideias & Estratégias para ver as tarefas importadas.')}
+
+  ${this.h3('Mapeamento de status')}
+  <div class="overflow-x-auto mb-4">
+    <table class="w-full text-xs text-gray-300 border-collapse">
+      <thead><tr class="border-b border-gray-700">${['Status ClickUp','Status na Plataforma'].map(h=>`<th class="text-left py-2 px-3 text-gray-400 font-semibold">${h}</th>`).join('')}</tr></thead>
+      <tbody>${[
+        ['done, complete, closed, aprovado', 'Aprovado'],
+        ['in progress, doing, em andamento', 'Testando'],
+        ['rejected, cancel, recusado', 'Rejeitado'],
+        ['Qualquer outro', 'Nova'],
+      ].map(([a,b])=>`<tr class="border-b border-gray-800"><td class="py-2 px-3 text-green-300 font-mono">${a}</td><td class="py-2 px-3 text-purple-300">${b}</td></tr>`).join('')}</tbody>
+    </table>
+  </div>
+
+  ${this.tip('Tarefas que já existem na plataforma (mesmo título) não são duplicadas. A sincronização só insere novidades.')}
+  ${this.warn('Apenas as tarefas da lista configurada são importadas — até 100 tarefas por sincronização.')}
+</div>`
+  },
+
+  sAutoProducts() {
+    return `
+<div>
+  ${this.h2('Criar Produtos por País Automaticamente', 'fas fa-wand-magic-sparkles')}
+  ${this.p('Esta função analisa os nomes de todas as campanhas do projeto ativo e cria automaticamente um <strong>produto por combinação de produto + país</strong>. Útil para quem tem campanhas rodando em vários países e quer que a IA tenha contexto de cada um.')}
+
+  ${this.h3('Como funciona')}
+  ${this.p('O algoritmo varre cada campanha de todas as contas do projeto e extrai:')}
+  ${['O <strong>nome do produto</strong>: remove códigos de país, palavras genéricas (cold, CBO, conversão, retargeting, etc.) e datas.', 'O <strong>código do país</strong>: detecta BR, US, MX, AR, CL, CO, PT, ES, etc. como palavra separada no nome da campanha.'].map(i => `<div class="flex items-start gap-2 text-sm text-gray-300 mb-2"><i class="fas fa-arrow-right text-blue-400 mt-1 flex-shrink-0 text-xs"></i>${i}</div>`).join('')}
+
+  ${this.h3('Exemplos de detecção')}
+  <div class="overflow-x-auto mb-4">
+    <table class="w-full text-xs text-gray-300 border-collapse">
+      <thead><tr class="border-b border-gray-700">${['Nome da Campanha','Produto Extraído','País'].map(h=>`<th class="text-left py-2 px-3 text-gray-400 font-semibold">${h}</th>`).join('')}</tr></thead>
+      <tbody>${[
+        ['GTS - BR - Conversão - Cold', 'GTS', 'BR'],
+        ['Ondelta | US | CBO | Video', 'Ondelta', 'US'],
+        ['Hot_MX_Retargeting_2024', 'Hot', 'MX'],
+        ['NovoProduto - PT - Awareness', 'NovoProduto', 'PT'],
+        ['TesteCampanha sem país', 'TesteCampanha sem país', '(nenhum)'],
+      ].map(([a,b,c])=>`<tr class="border-b border-gray-800"><td class="py-2 px-3 font-mono text-xs">${a}</td><td class="py-2 px-3 text-purple-300">${b}</td><td class="py-2 px-3 text-blue-300">${c}</td></tr>`).join('')}</tbody>
+    </table>
+  </div>
+
+  ${this.h3('Como usar')}
+  ${this.step(1, 'Verifique se há contas conectadas no projeto', 'O projeto ativo precisa ter pelo menos uma conta de anúncio com BM e token válido.')}
+  ${this.step(2, 'Vá em Configurações → Integrações', 'Menu lateral → Configurações → aba Integrações.')}
+  ${this.step(3, 'Clique em "Criar Produtos" (azul)', 'O botão "Produtos por País" dispara a varredura. Pode demorar alguns segundos dependendo da quantidade de campanhas.')}
+  ${this.step(4, 'Confira os produtos criados', 'Vá em Gestor IA → Produtos IA para ver os novos produtos. Edite as metas de CPA e ROAS de cada um.')}
+  ${this.ok('Produtos já existentes (mesmo nome + país) não são duplicados. Só cria os que ainda não existem.')}
+
+  ${this.h3('Palavras removidas do nome do produto')}
+  ${this.p('As seguintes palavras são ignoradas ao extrair o nome do produto:')}
+  <div class="flex flex-wrap gap-1.5 mb-4">
+    ${['cold','warm','hot','conversão','tráfego','retargeting','lookalike','lal','cbo','abo','prospecção','remarketing','awareness','reach','vendas','video','imagem','carrossel','test','scale','v2','v3','v4'].map(w=>`<span class="px-2 py-0.5 rounded text-xs font-mono bg-gray-800 text-gray-400">${w}</span>`).join('')}
+  </div>
+  ${this.tip('Depois de criar os produtos automaticamente, preencha as metas de CPA e ROAS de cada produto. A IA usa essas metas para avaliar se uma campanha está performando bem ou mal para aquele país específico.')}
+</div>`
+  },
+
+  sSessionSecret() {
+    return `
+<div>
+  ${this.h2('Sessão Persistente no Render', 'fas fa-shield-halved')}
+  ${this.p('Por padrão, o Render (plano gratuito) suspende o servidor após 15 minutos de inatividade. Quando o servidor reinicia, as sessões salvas no banco de dados são apagadas e você precisa fazer login novamente.')}
+  ${this.p('A solução é usar tokens <strong>sem estado (stateless)</strong>: a sessão fica <em>dentro do próprio token</em>, assinada com uma chave secreta. Não depende do banco de dados e sobrevive a qualquer restart.')}
+
+  ${this.h3('Configurar o SESSION_SECRET no Render')}
+  ${this.step(1, 'Acesse o Render', 'Vá em <strong>render.com</strong> e abra o painel do seu serviço (o backend da plataforma).')}
+  ${this.step(2, 'Abra "Environment"', 'No menu lateral do serviço, clique em <strong>Environment</strong>.')}
+  ${this.step(3, 'Adicione a variável', 'Clique em <strong>Add Environment Variable</strong> e preencha:<br><br><code class="text-green-400 text-xs">Key: SESSION_SECRET</code><br><code class="text-green-400 text-xs">Value: (qualquer string longa e aleatória)</code>')}
+  ${this.step(4, 'Gere um valor seguro', 'Use qualquer gerador de strings aleatórias. Exemplo de valor: <code class="text-green-400 text-xs">a8f3k2m9x1p0q7r6s5t4u3v2w1y0z9</code>. Pode ser qualquer coisa — o importante é ser único e secreto.')}
+  ${this.step(5, 'Salve e faça o deploy', 'Clique em <strong>Save Changes</strong>. O Render vai reimplantar o serviço automaticamente.')}
+  ${this.step(6, 'Faça login novamente', 'Após o deploy, faça login uma vez. O novo token gerado será stateless e <strong>não expirará com restarts</strong>.')}
+
+  ${this.ok('Depois de configurado, você nunca mais precisará fazer login após o servidor acordar. A sessão dura 30 dias a partir do último login.')}
+
+  ${this.h3('Como funciona por baixo')}
+  ${this.p('Quando SESSION_SECRET está definido:')}
+  ${['O login gera um token no formato <code class="text-xs text-green-400">sl.{payload_base64}.{assinatura_hmac}</code>', 'O payload contém: ID do usuário, email, nome e data de expiração (30 dias)', 'A assinatura HMAC-SHA256 garante que o token não pode ser forjado', 'Ao receber uma requisição, o backend valida a assinatura — sem consultar o banco'].map(i => `<div class="flex items-start gap-2 text-sm text-gray-300 mb-2"><i class="fas fa-arrow-right text-purple-400 mt-1 flex-shrink-0 text-xs"></i>${i}</div>`).join('')}
+
+  ${this.warn('Nunca compartilhe o valor do SESSION_SECRET. Quem tiver essa chave pode forjar tokens de sessão válidos.')}
+  ${this.tip('Se suspeitar que o SESSION_SECRET foi comprometido, troque o valor no Render. Todos os tokens antigos ficam inválidos instantaneamente e todos os usuários precisarão logar novamente.')}
 </div>`
   },
 

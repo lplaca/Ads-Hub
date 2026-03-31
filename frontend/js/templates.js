@@ -900,7 +900,7 @@ bm(s) {
     <div class="space-y-3">${bmRows || '<div class="glass rounded-2xl p-12 text-center"><i class="fas fa-building text-slate-600 text-4xl mb-3 block"></i><p class="text-slate-400">Nenhum BM configurado. Clique em "Adicionar BM" para começar.</p></div>'}</div>
 
     <!-- Modal BM -->
-    <div x-show="showModal" @click="showModal=false" class="fixed inset-0 z-[200] flex items-center justify-center p-6" style="display:none;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);">
+    <div x-show="showModal" @click="showModal=false" class="fixed inset-0 z-[9999] flex items-center justify-center p-6" style="display:none;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);">
       <div @click.stop style="width:100%;max-width:540px;max-height:90vh;overflow-y:auto;border-radius:16px;background:linear-gradient(160deg,rgba(22,32,52,0.98),rgba(12,18,36,0.99));border:1px solid rgba(71,85,105,0.4);box-shadow:0 48px 120px rgba(0,0,0,0.85),0 0 80px rgba(59,130,246,0.06);animation:modalIn 0.28s cubic-bezier(0.34,1.2,0.64,1);">
 
         <!-- Header -->
@@ -1190,7 +1190,7 @@ accounts(s) {
     </div>
 
     <!-- Modal Add/Edit Account -->
-    <div x-show="showModal" @click="showModal=false" class="fixed inset-0 z-[200] flex items-center justify-center p-6" style="display:none;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);">
+    <div x-show="showModal" @click="showModal=false" class="fixed inset-0 z-[9999] flex items-center justify-center p-6" style="display:none;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);">
       <div @click.stop style="width:100%;max-width:540px;max-height:90vh;overflow-y:auto;border-radius:16px;background:linear-gradient(160deg,rgba(22,32,52,0.98),rgba(12,18,36,0.99));border:1px solid rgba(71,85,105,0.4);box-shadow:0 48px 120px rgba(0,0,0,0.85),0 0 80px rgba(59,130,246,0.06);animation:modalIn 0.28s cubic-bezier(0.34,1.2,0.64,1);">
         <!-- Header -->
         <div class="p-5 flex items-center justify-between sticky top-0 z-10" style="border-bottom:1px solid rgba(51,65,85,0.3);background:linear-gradient(135deg,rgba(18,28,48,0.98),rgba(12,20,38,0.98));">
@@ -1541,7 +1541,7 @@ rules(s) {
     <div class="space-y-3">${ruleCards || '<div class="glass rounded-2xl p-12 text-center"><i class="fas fa-robot text-slate-600 text-4xl mb-3 block"></i><p class="text-slate-400 mb-4">Nenhuma regra criada ainda.</p><button @click="openAiModal()" class="btn btn-primary"><i class="fas fa-wand-magic-sparkles"></i> Criar minha primeira regra com IA</button></div>'}</div>
 
     <!-- ═══ AI RULE MODAL ══════════════════════════════════════════════════ -->
-    <div x-show="showAiModal" @click="showAiModal=false" class="fixed inset-0 z-[200] flex items-center justify-center p-6" style="display:none;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);">
+    <div x-show="showAiModal" @click="showAiModal=false" class="fixed inset-0 z-[9999] flex items-center justify-center p-6" style="display:none;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);">
       <div @click.stop style="width:100%;max-width:540px;max-height:90vh;overflow-y:auto;border-radius:16px;background:linear-gradient(160deg,rgba(22,32,52,0.98),rgba(12,18,36,0.99));border:1px solid rgba(71,85,105,0.4);box-shadow:0 48px 120px rgba(0,0,0,0.85),0 0 80px rgba(59,130,246,0.06);animation:modalIn 0.28s cubic-bezier(0.34,1.2,0.64,1);">
         <!-- Header -->
         <div class="p-5 flex items-center justify-between" style="border-bottom:1px solid rgba(51,65,85,0.3);background:linear-gradient(135deg,rgba(124,58,237,0.12),rgba(79,70,229,0.06));">
@@ -1670,7 +1670,7 @@ rules(s) {
     </div>
 
     <!-- ═══ CREATE/EDIT RULE MODAL ════════════════════════════════════════ -->
-    <div x-show="showModal" @click="showModal=false" class="fixed inset-0 z-[200] flex items-center justify-center p-6" style="display:none;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);">
+    <div x-show="showModal" @click="showModal=false" class="fixed inset-0 z-[9999] flex items-center justify-center p-6" style="display:none;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);">
       <div @click.stop style="width:100%;max-width:540px;max-height:90vh;overflow-y:auto;border-radius:16px;background:linear-gradient(160deg,rgba(22,32,52,0.98),rgba(12,18,36,0.99));border:1px solid rgba(71,85,105,0.4);box-shadow:0 48px 120px rgba(0,0,0,0.85),0 0 80px rgba(59,130,246,0.06);animation:modalIn 0.28s cubic-bezier(0.34,1.2,0.64,1);">
         <!-- Header -->
         <div class="p-5 flex items-center justify-between" style="border-bottom:1px solid rgba(51,65,85,0.3);background:linear-gradient(135deg,rgba(29,78,216,0.12),rgba(59,130,246,0.06));">
