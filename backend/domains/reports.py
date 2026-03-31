@@ -63,3 +63,15 @@ def get_analysis_overview(days: int = 30):
             "avg_roas": round(sum(d["roas"] for d in ts) / len(ts), 2),
         }
     }
+
+
+@router.get("/api/intelligence/forecast/{project_id}")
+def project_forecast(project_id: str, metric: str = "spend"):
+    from backend.services.forecast_service import get_project_forecast
+    return get_project_forecast(project_id, metric)
+
+
+@router.get("/api/intelligence/risk/{project_id}")
+def project_risk(project_id: str):
+    from backend.services.forecast_service import get_project_risk_score
+    return get_project_risk_score(project_id)

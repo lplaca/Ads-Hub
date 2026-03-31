@@ -337,3 +337,71 @@ def auto_create_products(pid: str):
     conn.commit()
     conn.close()
     return {"ok": True, "created": created}
+
+
+@router.get("/api/projects/{pid}/summary")
+def project_summary(pid: str):
+    """Resumo executivo completo do projeto para a página de detalhe."""
+    from datetime import datetime
+    conn = get_db()
+    project = conn.execute("SELECT * FROM projects WHERE id=?", (pid,)).fetchone()
+    if not project:
+        conn.close()
+        raise HTTPException(404, "Projeto não encontrado")
+    accounts = conn.execute(
+        "SELECT * FROM ad_accounts WHERE project_id=? AND status='active'", (pid,)).fetchall()
+    alerts_rows = conn.execute(
+        "SELECT * FROM alerts WHERE project_id=? AND status='active' ORDER BY created_at DESC LIMIT 10", (pid,)).fetchall()
+    try:
+        tasks_rows = conn.execute(
+            "SELECT * FROM tasks WHERE project_id=? AND status!='done' ORDER BY due_date ASC LIMIT 20", (pid,)).fetchall()
+    except Exception:
+        tasks_rows = []
+    conn.close()
+    return {
+        "project": dict(project),
+        "accounts": [dict(a) for a in accounts],
+        "alerts": [dict(a) for a in alerts_rows],
+        "tasks": [dict(t) for t in tasks_rows],
+        "alert_count": len(alerts_rows),
+        "task_count": len(tasks_rows),
+        "account_count": len(accounts),
+    }
+
+
+@router.get("/api/projects/{pid}/health")
+def project_health(pid: str):
+    """Score de saúde do projeto baseado em alertas, sync, integração."""
+    from datetime import datetime
+    conn = get_db()
+    project = conn.execute("SELECT * FROM projects WHERE id=?", (pid,)).fetchone()
+    if not project:
+        conn.close()
+        raise HTTPException(404, "Projeto não encontrado")
+    critical_alerts = conn.execute(
+        "SELECT COUNT(*) FROM alerts WHERE project_id=? AND severity='critical' AND status='active'",
+        (pid,)).fetchone()[0]
+    warning_alerts = conn.execute(
+        "SELECT COUNT(*) FROM alerts WHERE project_id=? AND severity='warning' AND status='active'",
+        (pid,)).fetchone()[0]
+    try:
+        overdue_tasks = conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE project_id=? AND status!='done' AND due_date < ? AND due_date != ''",
+            (pid, datetime.now().date().isoformat())).fetchone()[0]
+    except Exception:
+        overdue_tasks = 0
+    conn.close()
+    score = max(0, min(100, 100 - critical_alerts * 20 - warning_alerts * 5 - overdue_tasks * 10))
+    if score >= 80:
+        status = "healthy"
+    elif score >= 50:
+        status = "warning"
+    else:
+        status = "critical"
+    return {
+        "score": score,
+        "status": status,
+        "critical_alerts": critical_alerts,
+        "warning_alerts": warning_alerts,
+        "overdue_tasks": overdue_tasks,
+    }

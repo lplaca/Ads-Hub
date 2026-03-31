@@ -316,6 +316,21 @@ def init_db():
             result_count INTEGER DEFAULT 0,
             created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY,
+            project_id TEXT DEFAULT '',
+            title TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            status TEXT DEFAULT 'open',
+            priority TEXT DEFAULT 'normal',
+            due_date TEXT DEFAULT '',
+            responsible TEXT DEFAULT '',
+            origin TEXT DEFAULT 'platform',
+            clickup_task_id TEXT DEFAULT '',
+            alert_id TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
     """)
     conn.commit()
     # Migrations: add columns introduced after initial schema
@@ -329,6 +344,21 @@ def init_db():
         "ALTER TABLE projects ADD COLUMN notion_products_db_id TEXT DEFAULT ''",
         "ALTER TABLE projects ADD COLUMN clickup_token TEXT DEFAULT ''",
         "ALTER TABLE projects ADD COLUMN clickup_list_id TEXT DEFAULT ''",
+        # ETAPA 3 — vincular alertas ao projeto + campos de ação
+        "ALTER TABLE alerts ADD COLUMN project_id TEXT DEFAULT ''",
+        "ALTER TABLE alerts ADD COLUMN recommendation TEXT DEFAULT ''",
+        "ALTER TABLE alerts ADD COLUMN impact_estimate TEXT DEFAULT ''",
+        "ALTER TABLE alerts ADD COLUMN responsible TEXT DEFAULT ''",
+        # ETAPA 3 — expandir projetos com campos operacionais
+        "ALTER TABLE projects ADD COLUMN client_name TEXT DEFAULT ''",
+        "ALTER TABLE projects ADD COLUMN status TEXT DEFAULT 'active'",
+        "ALTER TABLE projects ADD COLUMN monthly_budget REAL DEFAULT 0",
+        "ALTER TABLE projects ADD COLUMN goal_roas REAL DEFAULT 0",
+        "ALTER TABLE projects ADD COLUMN goal_cpa REAL DEFAULT 0",
+        "ALTER TABLE projects ADD COLUMN goal_spend REAL DEFAULT 0",
+        "ALTER TABLE projects ADD COLUMN countries TEXT DEFAULT '[]'",
+        "ALTER TABLE projects ADD COLUMN notes TEXT DEFAULT ''",
+        "ALTER TABLE projects ADD COLUMN notion_page_id TEXT DEFAULT ''",
     ]
     for m in migrations:
         try:

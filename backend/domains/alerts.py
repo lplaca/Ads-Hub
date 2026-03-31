@@ -75,3 +75,46 @@ def test_alert_email(data: dict = {}):
     </div>"""
     result = _send_email(to_addr, "Teste — Ads Hub", html, s)
     return result
+
+
+@router.post("/api/alerts/{alert_id}/resolve")
+def resolve_alert(alert_id: str):
+    conn = get_db()
+    conn.execute("UPDATE alerts SET status='resolved' WHERE id=?", (alert_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.post("/api/alerts/{alert_id}/assign")
+def assign_alert(alert_id: str, data: dict):
+    conn = get_db()
+    conn.execute("UPDATE alerts SET responsible=? WHERE id=?", (data.get("responsible", ""), alert_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.post("/api/alerts/{alert_id}/create-task")
+def alert_to_task(alert_id: str, data: dict = {}):
+    import uuid
+    conn = get_db()
+    alert = conn.execute("SELECT * FROM alerts WHERE id=?", (alert_id,)).fetchone()
+    if not alert:
+        conn.close()
+        raise HTTPException(404, "Alerta não encontrado")
+    task_id = str(uuid.uuid4())
+    rule_name = alert["rule_name"] if alert["rule_name"] else ""
+    message = alert["message"] if alert["message"] else ""
+    title = f"[Alerta] {rule_name or message[:60]}"
+    project_id = alert["project_id"] if alert["project_id"] else ""
+    try:
+        conn.execute(
+            "INSERT INTO tasks (id, project_id, title, description, priority, alert_id, origin) VALUES (?,?,?,?,?,?,?)",
+            (task_id, project_id, title, message, "high", alert_id, "alert"))
+        conn.commit()
+    except Exception as e:
+        conn.close()
+        raise HTTPException(500, f"Erro ao criar tarefa: {e}")
+    conn.close()
+    return {"ok": True, "task_id": task_id}

@@ -161,3 +161,36 @@ def integrations_health():
     """Health status de todas as integrações configuradas."""
     from backend.services.health_service import get_all_integrations_health
     return get_all_integrations_health()
+
+
+@router.get("/api/integrations/clickup/workspaces")
+def clickup_workspaces():
+    from backend.core.settings import get_setting
+    from backend.integrations.clickup_client import get_workspaces
+    token = get_setting("clickup_token", "")
+    if not token:
+        from fastapi import HTTPException
+        raise HTTPException(400, "Token ClickUp não configurado")
+    return get_workspaces(token)
+
+
+@router.get("/api/integrations/clickup/lists/{space_id}")
+def clickup_lists(space_id: str):
+    from backend.core.settings import get_setting
+    from backend.integrations.clickup_client import get_lists
+    token = get_setting("clickup_token", "")
+    return get_lists(space_id, token)
+
+
+@router.post("/api/integrations/clickup/create-task")
+def clickup_create_task(data: dict):
+    from backend.core.settings import get_setting
+    from backend.integrations.clickup_client import create_task
+    from fastapi import HTTPException
+    token = get_setting("clickup_token", "")
+    if not token:
+        raise HTTPException(400, "Token ClickUp não configurado")
+    list_id = data.get("list_id") or get_setting("clickup_default_list_id", "")
+    if not list_id:
+        raise HTTPException(400, "list_id obrigatório")
+    return create_task(list_id, token, data.get("title", ""), data.get("description", ""))
