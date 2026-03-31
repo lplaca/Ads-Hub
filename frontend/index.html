@@ -141,9 +141,10 @@
 
     <!-- Nav Items -->
     <nav class="flex-1 p-2 overflow-y-auto overflow-x-hidden mt-1">
-      <!-- Group: main -->
+
+      <!-- ── Grupo: Comando ──────────────────────────────────────────────── -->
       <div x-show="!sidebarCollapsed" class="px-2 py-1.5 mt-1 mb-0.5">
-        <p class="text-slate-600 text-xs font-semibold uppercase tracking-widest">Visão Geral</p>
+        <p class="text-slate-600 text-xs font-semibold uppercase tracking-widest">Comando</p>
       </div>
       <template x-for="item in navItems.filter(n=>n.group==='main')" :key="item.id">
         <button
@@ -155,16 +156,21 @@
           :title="sidebarCollapsed ? item.label : ''"
         >
           <i :class="item.icon + ' icon text-base'" style="min-width:18px;"></i>
-          <span x-show="!sidebarCollapsed" class="text-sm font-medium whitespace-nowrap transition-all" x-text="item.label"></span>
+          <span x-show="!sidebarCollapsed" class="text-sm font-medium whitespace-nowrap transition-all flex-1" x-text="item.label"></span>
+          <span x-show="item.id === 'alerts' && alertCount > 0 && !sidebarCollapsed" x-text="alertCount"
+                class="ml-auto text-xs font-bold bg-red-500 text-white rounded-full flex items-center justify-center"
+                style="min-width:20px; height:20px; padding:0 4px;"></span>
+          <span x-show="item.id === 'alerts' && alertCount > 0 && sidebarCollapsed"
+                class="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full pulse-dot"></span>
         </button>
       </template>
 
-      <!-- Group: AI -->
+      <!-- ── Grupo: Operação ─────────────────────────────────────────────── -->
       <div x-show="!sidebarCollapsed" class="px-2 py-1.5 mt-3 mb-0.5">
-        <p class="text-xs font-semibold uppercase tracking-widest" style="color:#3b82f6aa;">Gestor IA</p>
+        <p class="text-slate-600 text-xs font-semibold uppercase tracking-widest">Operação</p>
       </div>
       <div x-show="sidebarCollapsed" class="my-1.5 mx-2 border-t border-slate-700/50"></div>
-      <template x-for="item in navItems.filter(n=>n.group==='ai')" :key="item.id">
+      <template x-for="item in navItems.filter(n=>n.group==='ops')" :key="item.id">
         <button
           @click="navigate(item.id)"
           :class="currentPage === item.id
@@ -175,16 +181,15 @@
         >
           <i :class="item.icon + ' icon text-base'" style="min-width:18px;"></i>
           <span x-show="!sidebarCollapsed" class="text-sm font-medium whitespace-nowrap transition-all flex-1" x-text="item.label"></span>
-          <span x-show="item.badge && !sidebarCollapsed" class="text-xs font-bold px-1.5 py-0.5 rounded-md ml-auto" style="background:rgba(59,130,246,0.2);color:#60a5fa;font-size:9px;" x-text="item.badge"></span>
         </button>
       </template>
 
-      <!-- Group: management -->
+      <!-- ── Grupo: Inteligência ─────────────────────────────────────────── -->
       <div x-show="!sidebarCollapsed" class="px-2 py-1.5 mt-3 mb-0.5">
-        <p class="text-slate-600 text-xs font-semibold uppercase tracking-widest">Gestão</p>
+        <p class="text-xs font-semibold uppercase tracking-widest" style="color:#3b82f6aa;">Inteligência</p>
       </div>
       <div x-show="sidebarCollapsed" class="my-1.5 mx-2 border-t border-slate-700/50"></div>
-      <template x-for="item in navItems.filter(n=>n.group==='management' && n.id!=='account-detail')" :key="item.id">
+      <template x-for="item in navItems.filter(n=>n.group==='intel')" :key="item.id">
         <button
           @click="navigate(item.id)"
           :class="currentPage === item.id
@@ -194,21 +199,33 @@
           :title="sidebarCollapsed ? item.label : ''"
         >
           <i :class="item.icon + ' icon text-base'" style="min-width:18px;"></i>
-          <span x-show="!sidebarCollapsed" class="text-sm font-medium whitespace-nowrap transition-all" x-text="item.label"></span>
-          <!-- Alert badge (expanded) -->
-          <span
-            x-show="item.id === 'alerts' && alertCount > 0 && !sidebarCollapsed"
-            x-text="alertCount"
-            class="ml-auto text-xs font-bold bg-red-500 text-white rounded-full flex items-center justify-center"
-            style="min-width:20px; height:20px; padding:0 4px;"
-          ></span>
-          <!-- Alert dot (collapsed) -->
-          <span
-            x-show="item.id === 'alerts' && alertCount > 0 && sidebarCollapsed"
-            class="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full pulse-dot"
-          ></span>
+          <span x-show="!sidebarCollapsed" class="text-sm font-medium whitespace-nowrap transition-all flex-1" x-text="item.label"></span>
+          <span x-show="item.badge && item.badge !== 'alertCount' && !sidebarCollapsed"
+                class="text-xs font-bold px-1.5 py-0.5 rounded-md ml-auto"
+                style="background:rgba(59,130,246,0.2);color:#60a5fa;font-size:9px;"
+                x-text="item.badge"></span>
         </button>
       </template>
+
+      <!-- ── Grupo: Sistema ──────────────────────────────────────────────── -->
+      <div x-show="!sidebarCollapsed" class="px-2 py-1.5 mt-3 mb-0.5">
+        <p class="text-slate-600 text-xs font-semibold uppercase tracking-widest">Sistema</p>
+      </div>
+      <div x-show="sidebarCollapsed" class="my-1.5 mx-2 border-t border-slate-700/50"></div>
+      <template x-for="item in navItems.filter(n=>n.group==='config')" :key="item.id">
+        <button
+          @click="navigate(item.id)"
+          :class="currentPage === item.id
+            ? 'bg-blue-600/20 text-blue-400 border-blue-500/30'
+            : 'text-slate-500 hover:bg-slate-800/60 hover:text-slate-300 border-transparent'"
+          class="sidebar-item relative group"
+          :title="sidebarCollapsed ? item.label : ''"
+        >
+          <i :class="item.icon + ' icon text-base'" style="min-width:18px;"></i>
+          <span x-show="!sidebarCollapsed" class="text-sm font-medium whitespace-nowrap transition-all flex-1" x-text="item.label"></span>
+        </button>
+      </template>
+
     </nav>
 
     <!-- Divider + Collapse button (desktop) -->
@@ -243,7 +260,7 @@
         <!-- Right: Actions -->
         <div class="flex items-center gap-2">
           <!-- No accounts badge -->
-          <div x-show="$store.meta.accountCount === 0" class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer" style="background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3); color: #60a5fa;" @click="$dispatch('navigate',{page:'connections'})">
+          <div x-show="$store.meta.accountCount === 0" class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer" style="background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3); color: #60a5fa;" @click="$dispatch('navigate',{page:'integrations'})">
             <i class="fas fa-plug text-xs"></i>
             <span>Conectar API</span>
           </div>
@@ -428,11 +445,6 @@
           <div x-html="renderPage()"></div>
         </div>
 
-        <!-- MANUAL — Guia Completo da Plataforma -->
-        <div x-show="currentPage === 'manual'" x-data="ManualPage" class="h-full">
-          <div x-html="renderPage()"></div>
-        </div>
-
         <!-- API CONNECTIONS -->
         <div x-show="currentPage === 'connections'" x-data="ConnectionsPage" x-init="init()">
           <div x-html="renderPage()"></div>
@@ -451,6 +463,39 @@
         <!-- ACCOUNT DETAIL -->
         <div x-show="currentPage === 'account-detail'" x-data="AccountDetailPage"
              @navigate.window="$event.detail?.page==='account-detail' && onNav()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- ── NOVAS PÁGINAS ──────────────────────────────────────────────── -->
+
+        <!-- PROJECTS -->
+        <div x-show="currentPage === 'projects'" x-data="ProjectsPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- TASKS -->
+        <div x-show="currentPage === 'tasks'" x-data="TasksPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- INTEGRATIONS -->
+        <div x-show="currentPage === 'integrations'" x-data="IntegrationsPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- INTELLIGENCE -->
+        <div x-show="currentPage === 'intelligence'" x-data="IntelligencePage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- AUTOMATION -->
+        <div x-show="currentPage === 'automation'" x-data="AutomationPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- PROJECT DETAIL -->
+        <div x-show="currentPage === 'project-detail'" x-data="ProjectDetailPage" x-init="init()"
+             @navigate.window="$event.detail?.page==='project-detail' && (projectId = $event.detail.projectId) && init()">
           <div x-html="renderPage()"></div>
         </div>
 
@@ -592,12 +637,12 @@ document.addEventListener('alpine:init', () => {
 <script src="/static/js/templates.js?v=3"></script>
 <script src="/static/js/agent.js?v=3"></script>
 <script src="/static/js/pages-launcher.js?v=1"></script>
-<script src="/static/js/pages-manual.js?v=1"></script>
 <script src="/static/js/pages-connections.js?v=1"></script>
 <script src="/static/js/pages-account-detail.js?v=1"></script>
 <script src="/static/js/pages-sync.js?v=1"></script>
 <script src="/static/js/pages-auth.js?v=1"></script>
 <script src="/static/js/pages-intel.js?v=1"></script>
+<script src="/static/js/pages-new.js?v=1"></script>
 
 </body>
 </html>

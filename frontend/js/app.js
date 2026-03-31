@@ -63,33 +63,31 @@ Alpine.store('meta', {
 
 // ── NAV CONFIG ────────────────────────────────────────────────────────────────
 const NAV = [
-  // ── Visão Geral ──
-  { id:'dashboard',    label:'Dashboard',         icon:'fas fa-chart-pie',             subtitle:'Visão geral de todas as campanhas', group:'main' },
-  { id:'campaigns',    label:'Campanhas',         icon:'fas fa-layer-group',           subtitle:'Lista detalhada de campanhas com saúde IA', group:'main' },
+  // ── Centro de Comando ──────────────────────────────────────────────────────
+  { id: 'dashboard',    label: 'Visão Geral',      icon: 'fas fa-chart-pie',            subtitle: 'Centro de comando — o que está acontecendo agora', group: 'main' },
+  { id: 'projects',     label: 'Projetos',          icon: 'fas fa-folder-open',          subtitle: 'Todos os seus projetos e clientes', group: 'main' },
+  { id: 'alerts',       label: 'Alertas',           icon: 'fas fa-triangle-exclamation', subtitle: 'O que exige atenção imediata', group: 'main', badge: 'alertCount' },
 
-  // ── Gestor IA ──
-  { id:'agent',        label:'Gestor IA',         icon:'fas fa-robot',                 subtitle:'Painel central do agente de IA 24/7', group:'ai', badge:'IA' },
-  { id:'knowledge',    label:'Conhecimento',      icon:'fas fa-brain',                 subtitle:'Ensine o gestor sobre seu negócio', group:'ai' },
-  { id:'chat',         label:'Conversar',         icon:'fas fa-comments',              subtitle:'Chat em tempo real com o gestor IA', group:'ai' },
-  { id:'ideas',        label:'Ideias & Estratégias', icon:'fas fa-lightbulb',         subtitle:'Sugestões geradas pelo gestor IA', group:'ai' },
-  { id:'analysis',     label:'Análise Profunda',  icon:'fas fa-magnifying-glass-chart', subtitle:'Gráficos e métricas avançadas', group:'ai' },
+  // ── Operação ───────────────────────────────────────────────────────────────
+  { id: 'campaigns',    label: 'Campanhas',         icon: 'fas fa-layer-group',          subtitle: 'Campanhas ativas por projeto e conta', group: 'ops' },
+  { id: 'tasks',        label: 'Tarefas',           icon: 'fas fa-circle-check',         subtitle: 'Tarefas da plataforma + ClickUp', group: 'ops' },
+  { id: 'reports',      label: 'Relatórios',        icon: 'fas fa-file-chart-column',    subtitle: 'Gere e exporte relatórios por projeto', group: 'ops' },
 
-  // ── Gestão ──
-  { id:'intel',        label:'Inteligência',       icon:'fas fa-globe',                 subtitle:'Pesquise estratégias globais em Reddit, YouTube, X e blogs', group:'management', badge:'WEB' },
-  { id:'connections',  label:'Conexões de API',   icon:'fas fa-plug',                  subtitle:'Tokens Meta e capacidades disponíveis', group:'management' },
-  { id:'importar',     label:'Importar Produtos', icon:'fas fa-file-import',           subtitle:'Sync Google Sheets + lançar campanhas com 1 clique', group:'management', badge:'NOVO' },
-  { id:'bm',           label:'Business Managers', icon:'fas fa-building',              subtitle:'Gerencie seus BMs conectados', group:'management' },
-  { id:'accounts',     label:'Contas de Anúncio', icon:'fas fa-credit-card',           subtitle:'Todas as contas de anúncio', group:'management' },
-  { id:'products',     label:'Produtos',          icon:'fas fa-box',                   subtitle:'Análise de performance por produto', group:'management' },
-  { id:'rules',        label:'Regras',            icon:'fas fa-shield-halved',         subtitle:'Automações e regras de otimização', group:'management' },
-  { id:'alerts',       label:'Alertas',           icon:'fas fa-bell',                  subtitle:'Campanhas que precisam de atenção', group:'management' },
-  { id:'reports',      label:'Relatórios',        icon:'fas fa-file-chart-column',     subtitle:'Gere e exporte relatórios', group:'management' },
-  { id:'quickactions', label:'Ações Rápidas',     icon:'fas fa-bolt',                  subtitle:'Pause ou ative campanhas rapidamente', group:'management' },
-  { id:'settings',     label:'Configurações',     icon:'fas fa-gear',                  subtitle:'Preferências e integrações', group:'management' },
-  { id:'sync',         label:'Sync de Trabalho',  icon:'fas fa-arrows-rotate',         subtitle:'Registre sessões e publique no ClickUp & Notion', group:'management' },
-  { id:'manual',       label:'Manual',            icon:'fas fa-book-open',             subtitle:'Guia completo passo a passo da plataforma', group:'management' },
-  // hidden (navigated programmatically)
-  { id:'account-detail', label:'Detalhe da Conta', icon:'fas fa-chart-bar', subtitle:'Campanhas e conjuntos de anúncios', group:'management' },
+  // ── Inteligência ───────────────────────────────────────────────────────────
+  { id: 'agent',        label: 'Gestor IA',         icon: 'fas fa-robot',                subtitle: 'Agente autônomo 24/7', group: 'intel', badge: 'IA' },
+  { id: 'intelligence', label: 'Inteligência',      icon: 'fas fa-brain',                subtitle: 'Forecast, riscos e previsões', group: 'intel' },
+  { id: 'ideas',        label: 'Ideias',            icon: 'fas fa-lightbulb',            subtitle: 'Sugestões geradas pelo gestor IA', group: 'intel' },
+
+  // ── Sistema ────────────────────────────────────────────────────────────────
+  { id: 'integrations', label: 'Integrações',       icon: 'fas fa-plug',                 subtitle: 'Meta, Google, TikTok, ClickUp, Notion', group: 'config' },
+  { id: 'automation',   label: 'Automação',         icon: 'fas fa-shield-halved',        subtitle: 'Regras, lançador e jobs automáticos', group: 'config' },
+  { id: 'settings',     label: 'Configurações',     icon: 'fas fa-gear',                 subtitle: 'Conta, preferências e segurança', group: 'config' },
+
+  // ── Ocultos (navegação programática) ───────────────────────────────────────
+  { id: 'project-detail', label: 'Detalhe do Projeto', icon: 'fas fa-folder',   subtitle: '', group: 'hidden' },
+  { id: 'account-detail', label: 'Detalhe da Conta',   icon: 'fas fa-chart-bar',subtitle: '', group: 'hidden' },
+  { id: 'chat',           label: 'Chat',                icon: 'fas fa-comments', subtitle: '', group: 'hidden' },
+  { id: 'knowledge',      label: 'Conhecimento',        icon: 'fas fa-book',     subtitle: '', group: 'hidden' },
 ];
 
 // ── MAIN APP ──────────────────────────────────────────────────────────────────

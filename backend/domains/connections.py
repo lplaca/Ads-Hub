@@ -154,3 +154,10 @@ def live_summary(period: str = "today"):
         "totals": totals,
         "accounts": account_data,
     }
+
+
+@router.get("/api/health")
+def integrations_health():
+    """Health status de todas as integrações configuradas."""
+    from backend.services.health_service import get_all_integrations_health
+    return get_all_integrations_health()
