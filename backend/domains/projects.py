@@ -408,14 +408,93 @@ def project_health(pid: str):
 
 
 @router.get("/api/projects/{pid}/accounts")
-def project_accounts(pid: str):
-    """Contas de anúncios vinculadas a este projeto."""
+def project_accounts(pid: str, period: str = "last_7d"):
+    """Contas de anúncios vinculadas a este projeto, com métricas de gasto."""
+    from backend.integrations.meta_client import meta_get
     conn = get_db()
     rows = conn.execute(
         "SELECT * FROM ad_accounts WHERE project_id=? ORDER BY name", (pid,)
     ).fetchall()
     conn.close()
+    result = []
+    for row in rows:
+        a = dict(row)
+        a.pop("access_token", None)
+        # Fetch account-level spend from Meta API
+        try:
+            token = dict(row).get("access_token", "")
+            if token:
+                clean_id = a["account_id"].replace("act_", "")
+                ins = meta_get(
+                    f"act_{clean_id}/insights",
+                    token,
+                    {"fields": "spend,impressions,clicks,cpm,ctr,actions", "date_preset": period, "level": "account"}
+                )
+                data = ins.get("data", [{}])
+                if data:
+                    d = data[0]
+                    a["spend"] = float(d.get("spend", 0))
+                    a["impressions"] = int(d.get("impressions", 0))
+                    a["clicks"] = int(d.get("clicks", 0))
+                    a["ctr"] = float(d.get("ctr", 0))
+                    # Extract conversions from actions
+                    actions = d.get("actions", [])
+                    conv = next((float(x["value"]) for x in actions if x["action_type"] == "purchase"), 0)
+                    a["conversions"] = conv
+                    a["roas"] = round(conv / a["spend"], 2) if a["spend"] > 0 else 0
+                else:
+                    a.update({"spend": 0, "impressions": 0, "clicks": 0, "ctr": 0, "conversions": 0, "roas": 0})
+        except Exception:
+            a.update({"spend": 0, "impressions": 0, "clicks": 0, "ctr": 0, "conversions": 0, "roas": 0})
+        result.append(a)
+    return result
+
+
+@router.get("/api/projects/{pid}/accounts/available")
+def available_accounts(pid: str):
+    """Todas as contas de anúncios no DB (para vinculação ao projeto)."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id, name, account_id, bm_id, country, status, project_id FROM ad_accounts ORDER BY name"
+    ).fetchall()
+    conn.close()
     return [dict(r) for r in rows]
+
+
+@router.get("/api/projects/{pid}/accounts/{account_id}/campaigns")
+def account_campaigns(pid: str, account_id: str, period: str = "last_7d"):
+    """Campanhas de uma conta de anúncios específica, com métricas."""
+    from backend.integrations.meta_client import fetch_meta_campaigns, fetch_meta_insights
+    from backend.domains.accounts import _EMPTY_METRICS
+    conn = get_db()
+    acc_row = conn.execute(
+        "SELECT * FROM ad_accounts WHERE id=? AND project_id=?", (account_id, pid)
+    ).fetchone()
+    conn.close()
+    if not acc_row:
+        return []
+    acc = dict(acc_row)
+    token = acc.get("access_token", "")
+    if not token:
+        return []
+    try:
+        campaigns = fetch_meta_campaigns(acc["account_id"], token)
+    except Exception:
+        return []
+    result = []
+    for c in campaigns:
+        try:
+            ins = fetch_meta_insights(c["id"], token, period)
+        except Exception:
+            ins = {}
+        result.append({
+            "id": c["id"],
+            "name": c["name"],
+            "status": c.get("status", "").lower(),
+            "objective": c.get("objective", ""),
+            **{k: ins.get(k, 0) for k in _EMPTY_METRICS},
+        })
+    return result
 
 
 @router.post("/api/projects/{pid}/accounts/{account_id}/assign")
