@@ -61,39 +61,84 @@ Alpine.store('meta', {
   },
 });
 
+// ── NAV GROUPS ────────────────────────────────────────────────────────────────
+const NAV_GROUPS = [
+  { id: 'meta',         label: 'Meta Ads',      color: '#1877f2', bgColor: 'rgba(24,119,242,0.08)',  icon: 'fab fa-meta' },
+  { id: 'google',       label: 'Google Ads',    color: '#4285f4', bgColor: 'rgba(66,133,244,0.08)',  icon: 'fab fa-google' },
+  { id: 'products',     label: 'Produtos',      color: '#f59e0b', bgColor: 'rgba(245,158,11,0.08)',  icon: 'fas fa-box' },
+  { id: 'intel',        label: 'Inteligência',  color: '#a855f7', bgColor: 'rgba(168,85,247,0.08)',  icon: 'fas fa-brain' },
+  { id: 'ops',          label: 'Otimizações',   color: '#22c55e', bgColor: 'rgba(34,197,94,0.08)',   icon: 'fas fa-chart-line' },
+  { id: 'integrations', label: 'Integrações',   color: '#64748b', bgColor: 'rgba(100,116,139,0.08)', icon: 'fas fa-plug' },
+  { id: 'config',       label: 'Configurações', color: '#94a3b8', bgColor: 'rgba(148,163,184,0.08)', icon: 'fas fa-gear' },
+];
+
 // ── NAV CONFIG ────────────────────────────────────────────────────────────────
 const NAV = [
-  // ── Centro de Comando ──────────────────────────────────────────────────────
-  { id: 'dashboard',    label: 'Visão Geral',      icon: 'fas fa-chart-pie',            subtitle: 'Centro de comando — o que está acontecendo agora', group: 'main' },
-  { id: 'projects',     label: 'Projetos',          icon: 'fas fa-folder-open',          subtitle: 'Todos os seus projetos e clientes', group: 'main' },
-  { id: 'alerts',       label: 'Alertas',           icon: 'fas fa-triangle-exclamation', subtitle: 'O que exige atenção imediata', group: 'main', badge: 'alertCount' },
+  // ── Meta Ads ──────────────────────────────────────────────────────────────
+  { id: 'dashboard',         label: 'Visão Geral',        icon: 'fas fa-chart-pie',            subtitle: 'Overview das métricas Meta Ads',          group: 'meta' },
+  { id: 'bm',                label: 'Business Managers',  icon: 'fas fa-building',             subtitle: 'Gerenciar Business Managers',              group: 'meta' },
+  { id: 'accounts',          label: 'Contas de Anúncios', icon: 'fas fa-wallet',               subtitle: 'Todas as contas de anúncios vinculadas',   group: 'meta' },
+  { id: 'campaigns',         label: 'Campanhas',          icon: 'fas fa-layer-group',          subtitle: 'Campanhas ativas e pausadas',               group: 'meta' },
+  { id: 'adsets',            label: 'Conjuntos',          icon: 'fas fa-object-group',         subtitle: 'Ad sets / conjuntos de anúncios',          group: 'meta' },
+  { id: 'meta-ads',          label: 'Anúncios',           icon: 'fas fa-rectangle-ad',         subtitle: 'Criativos e anúncios individuais',          group: 'meta' },
+  { id: 'reports',           label: 'Análises',           icon: 'fas fa-chart-line',           subtitle: 'Relatórios e análises de desempenho',      group: 'meta' },
+  { id: 'meta-countries',    label: 'Países',             icon: 'fas fa-globe',                subtitle: 'Segmentação e performance por país',       group: 'meta' },
+  { id: 'rules',             label: 'Regras',             icon: 'fas fa-shield-halved',        subtitle: 'Automações e regras de otimização',        group: 'meta' },
+  { id: 'quickactions',      label: 'Ações em Massa',     icon: 'fas fa-bolt',                 subtitle: 'Editar múltiplas campanhas de uma vez',    group: 'meta' },
 
-  // ── Operação ───────────────────────────────────────────────────────────────
-  { id: 'campaigns',    label: 'Campanhas',         icon: 'fas fa-layer-group',          subtitle: 'Campanhas ativas por projeto e conta', group: 'ops' },
-  { id: 'tasks',        label: 'Tarefas',           icon: 'fas fa-circle-check',         subtitle: 'Tarefas da plataforma + ClickUp', group: 'ops' },
-  { id: 'reports',      label: 'Relatórios',        icon: 'fas fa-file-chart-column',    subtitle: 'Gere e exporte relatórios por projeto', group: 'ops' },
+  // ── Google Ads ────────────────────────────────────────────────────────────
+  { id: 'google-overview',   label: 'Visão Geral',        icon: 'fas fa-chart-pie',            subtitle: 'Overview das métricas Google Ads',         group: 'google' },
+  { id: 'google-accounts',   label: 'Contas',             icon: 'fas fa-wallet',               subtitle: 'Contas do Google Ads',                     group: 'google' },
+  { id: 'google-campaigns',  label: 'Campanhas',          icon: 'fas fa-layer-group',          subtitle: 'Campanhas Google Ads',                     group: 'google' },
+  { id: 'google-adgroups',   label: 'Grupos de Anúncios', icon: 'fas fa-object-group',         subtitle: 'Ad groups do Google Ads',                  group: 'google' },
+  { id: 'google-ads',        label: 'Anúncios',           icon: 'fas fa-rectangle-ad',         subtitle: 'Criativos Google Ads',                     group: 'google' },
+  { id: 'google-keywords',   label: 'Palavras-chave',     icon: 'fas fa-key',                  subtitle: 'Gestão de keywords',                       group: 'google' },
+  { id: 'google-analytics',  label: 'Análises',           icon: 'fas fa-chart-line',           subtitle: 'Relatórios Google Ads',                    group: 'google' },
 
-  // ── Inteligência ───────────────────────────────────────────────────────────
-  { id: 'agent',        label: 'Gestor IA',         icon: 'fas fa-robot',                subtitle: 'Agente autônomo 24/7', group: 'intel', badge: 'IA' },
-  { id: 'intelligence', label: 'Inteligência',      icon: 'fas fa-brain',                subtitle: 'Forecast, riscos e previsões', group: 'intel' },
-  { id: 'ideas',        label: 'Ideias',            icon: 'fas fa-lightbulb',            subtitle: 'Sugestões geradas pelo gestor IA', group: 'intel' },
+  // ── Produtos ──────────────────────────────────────────────────────────────
+  { id: 'products',          label: 'Todos os Produtos',  icon: 'fas fa-box',                  subtitle: 'Catálogo completo de produtos',            group: 'products' },
+  { id: 'importar',          label: 'Importar',           icon: 'fas fa-file-import',          subtitle: 'Importar via planilha ou Sheets',          group: 'products' },
+  { id: 'product-perf',      label: 'Performance',        icon: 'fas fa-chart-bar',            subtitle: 'ROAS e métricas por produto',              group: 'products' },
+  { id: 'product-countries', label: 'Por País',           icon: 'fas fa-flag',                 subtitle: 'Produtos segmentados por país',            group: 'products' },
 
-  // ── Sistema ────────────────────────────────────────────────────────────────
-  { id: 'integrations', label: 'Integrações',       icon: 'fas fa-plug',                 subtitle: 'Meta, Google, TikTok, ClickUp, Notion', group: 'config' },
-  { id: 'automation',   label: 'Automação',         icon: 'fas fa-shield-halved',        subtitle: 'Regras, lançador e jobs automáticos', group: 'config' },
-  { id: 'settings',     label: 'Configurações',     icon: 'fas fa-gear',                 subtitle: 'Conta, preferências e segurança', group: 'config' },
+  // ── Inteligência ──────────────────────────────────────────────────────────
+  { id: 'agent',             label: 'Gestor IA',          icon: 'fas fa-robot',                subtitle: 'Agente autônomo de otimização',            group: 'intel', badge: 'IA' },
+  { id: 'chat',              label: 'Chat IA',            icon: 'fas fa-comments',             subtitle: 'Conversa com o assistente IA',             group: 'intel' },
+  { id: 'alerts',            label: 'Alertas',            icon: 'fas fa-triangle-exclamation', subtitle: 'Alertas que exigem atenção',               group: 'intel', badge: 'alertCount' },
+  { id: 'ai-rules',          label: 'Regras do Gestor',   icon: 'fas fa-sliders',              subtitle: 'Regras automáticas para o Gestor IA',      group: 'intel' },
+  { id: 'intelligence',      label: 'Previsões',          icon: 'fas fa-chart-mixed',          subtitle: 'Forecast e análise de risco',              group: 'intel' },
+  { id: 'ideas',             label: 'Ideias',             icon: 'fas fa-lightbulb',            subtitle: 'Sugestões geradas pelo Gestor IA',         group: 'intel' },
+  { id: 'knowledge',         label: 'Conhecimento',       icon: 'fas fa-book',                 subtitle: 'Base de conhecimento e arquivos',          group: 'intel' },
 
-  // ── Ocultos (navegação programática) ───────────────────────────────────────
-  { id: 'project-detail', label: 'Detalhe do Projeto', icon: 'fas fa-folder',   subtitle: '', group: 'hidden' },
-  { id: 'account-detail', label: 'Detalhe da Conta',   icon: 'fas fa-chart-bar',subtitle: '', group: 'hidden' },
-  { id: 'chat',           label: 'Chat',                icon: 'fas fa-comments', subtitle: '', group: 'hidden' },
-  { id: 'knowledge',      label: 'Conhecimento',        icon: 'fas fa-book',     subtitle: '', group: 'hidden' },
+  // ── Otimizações ──────────────────────────────────────────────────────────
+  { id: 'tasks',             label: 'Tarefas',            icon: 'fas fa-circle-check',         subtitle: 'Tarefas da operação + ClickUp',            group: 'ops' },
+  { id: 'automation',        label: 'Automação',          icon: 'fas fa-shield-halved',        subtitle: 'Regras e jobs automáticos',                group: 'ops' },
+  { id: 'sync',              label: 'Sincronização',      icon: 'fas fa-rotate',               subtitle: 'Sync com ClickUp e Notion',                group: 'ops' },
+
+  // ── Integrações ───────────────────────────────────────────────────────────
+  { id: 'integrations',      label: 'Visão Geral',        icon: 'fas fa-plug',                 subtitle: 'Status de todas as integrações',           group: 'integrations' },
+  { id: 'connections',       label: 'Meta Ads API',       icon: 'fab fa-meta',                 subtitle: 'Tokens e contas Meta',                     group: 'integrations' },
+  { id: 'google-connect',    label: 'Google Ads API',     icon: 'fab fa-google',               subtitle: 'Credenciais Google Ads',                   group: 'integrations' },
+  { id: 'clickup-int',       label: 'ClickUp',            icon: 'fas fa-circle-check',         subtitle: 'Integração ClickUp',                       group: 'integrations' },
+  { id: 'notion-int',        label: 'Notion',             icon: 'fas fa-n',                    subtitle: 'Integração Notion',                        group: 'integrations' },
+  { id: 'ai-int',            label: 'IA (Claude/GPT)',    icon: 'fas fa-robot',                subtitle: 'Chaves de API para IA',                    group: 'integrations' },
+
+  // ── Configurações ─────────────────────────────────────────────────────────
+  { id: 'projects',          label: 'Projetos',           icon: 'fas fa-folder-open',          subtitle: 'Gerenciar projetos e clientes',            group: 'config' },
+  { id: 'settings',          label: 'Configurações',      icon: 'fas fa-gear',                 subtitle: 'Conta, preferências e segurança',          group: 'config' },
+  { id: 'profile',           label: 'Meu Perfil',         icon: 'fas fa-user-circle',          subtitle: 'Dados pessoais e senha',                   group: 'config' },
+
+  // ── Ocultos (navegação programática) ──────────────────────────────────────
+  { id: 'project-detail', label: '', icon: '', subtitle: '', group: 'hidden' },
+  { id: 'account-detail', label: '', icon: '', subtitle: '', group: 'hidden' },
 ];
 
 // ── MAIN APP ──────────────────────────────────────────────────────────────────
 Alpine.data('App', () => ({
   currentPage: 'dashboard',
   navItems: NAV,
+  navGroups: NAV_GROUPS,
+  openGroups: { meta: true, google: false, products: false, intel: true, ops: false, integrations: false, config: false },
   sidebarOpen: false,
   sidebarCollapsed: false,
   isMobile: window.innerWidth < 1024,
@@ -123,6 +168,12 @@ Alpine.data('App', () => ({
     window.addEventListener('resize', () => { this.isMobile = window.innerWidth < 1024; });
     window.addEventListener('show-toast', e => this.addToast(e.detail));
     window.addEventListener('navigate', e => { if (e.detail?.page) this.navigate(e.detail.page); });
+    // Reset sidebar scroll to top on load (setTimeout needed — Alpine renders after nextTick)
+    this.$nextTick(() => {
+      document.querySelector('nav')?.scrollTo(0, 0);
+      setTimeout(() => { document.querySelector('nav')?.scrollTo(0, 0); }, 100);
+      setTimeout(() => { document.querySelector('nav')?.scrollTo(0, 0); }, 400);
+    });
     await this.$store.meta.refresh();
     const alerts = await API.get('/api/alerts');
     if (alerts) this.alertCount = alerts.filter(a => a.status === 'active').length;
@@ -145,11 +196,19 @@ Alpine.data('App', () => ({
     }
   },
 
+  toggleGroup(g) {
+    this.openGroups[g] = !this.openGroups[g];
+  },
+
   navigate(page) {
     this.currentPage = page;
     this.sidebarOpen = false;
-    window.scrollTo(0,0);
-    // Immediately refresh live data on nav change
+    window.scrollTo(0, 0);
+    // Auto-expand the group of this page
+    const item = NAV.find(n => n.id === page);
+    if (item && item.group !== 'hidden') {
+      this.openGroups[item.group] = true;
+    }
     this.pollLive();
   },
 
