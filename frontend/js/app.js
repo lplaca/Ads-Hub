@@ -103,9 +103,10 @@ const NAV = [
 
   // ── Inteligência ──────────────────────────────────────────────────────────
   { id: 'agent',             label: 'Gestor IA',          icon: 'fas fa-robot',                subtitle: 'Agente autônomo de otimização',            group: 'intel', badge: 'IA' },
-  { id: 'chat',              label: 'Chat',               icon: 'fas fa-comments',             subtitle: 'Conversa com o assistente IA',             group: 'intel' },
+  { id: 'chat',              label: 'Chat IA',            icon: 'fas fa-comments',             subtitle: 'Conversa com o assistente IA',             group: 'intel' },
   { id: 'alerts',            label: 'Alertas',            icon: 'fas fa-triangle-exclamation', subtitle: 'Alertas que exigem atenção',               group: 'intel', badge: 'alertCount' },
-  { id: 'intelligence',      label: 'Previsões',          icon: 'fas fa-brain',                subtitle: 'Forecast e análise de risco',              group: 'intel' },
+  { id: 'ai-rules',          label: 'Regras do Gestor',   icon: 'fas fa-sliders',              subtitle: 'Regras automáticas para o Gestor IA',      group: 'intel' },
+  { id: 'intelligence',      label: 'Previsões',          icon: 'fas fa-chart-mixed',          subtitle: 'Forecast e análise de risco',              group: 'intel' },
   { id: 'ideas',             label: 'Ideias',             icon: 'fas fa-lightbulb',            subtitle: 'Sugestões geradas pelo Gestor IA',         group: 'intel' },
   { id: 'knowledge',         label: 'Conhecimento',       icon: 'fas fa-book',                 subtitle: 'Base de conhecimento e arquivos',          group: 'intel' },
 
@@ -125,6 +126,7 @@ const NAV = [
   // ── Configurações ─────────────────────────────────────────────────────────
   { id: 'projects',          label: 'Projetos',           icon: 'fas fa-folder-open',          subtitle: 'Gerenciar projetos e clientes',            group: 'config' },
   { id: 'settings',          label: 'Configurações',      icon: 'fas fa-gear',                 subtitle: 'Conta, preferências e segurança',          group: 'config' },
+  { id: 'profile',           label: 'Meu Perfil',         icon: 'fas fa-user-circle',          subtitle: 'Dados pessoais e senha',                   group: 'config' },
 
   // ── Ocultos (navegação programática) ──────────────────────────────────────
   { id: 'project-detail', label: '', icon: '', subtitle: '', group: 'hidden' },

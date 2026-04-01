@@ -1429,4 +1429,58 @@ Alpine.data('GooglePlaceholderPage', () => ({
 }));
 
 
+// ── Profile Page ─────────────────────────────────────────────────────────────
+Alpine.data('ProfilePage', () => ({
+  user: null,
+  form: { name: '', email: '', current_password: '', new_password: '', confirm_password: '' },
+  saving: false,
+  tab: 'profile',
+  error: '',
+  success: '',
+
+  init() {
+    this.user = Auth.getUser();
+    if (this.user) {
+      this.form.name = this.user.name || '';
+      this.form.email = this.user.email || '';
+    }
+    window.addEventListener('auth-user-updated', () => {
+      this.user = Auth.getUser();
+      this.form.name = this.user?.name || '';
+      this.form.email = this.user?.email || '';
+    });
+  },
+
+  initials() {
+    const name = this.user?.name || this.user?.email || 'U';
+    return name.split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase();
+  },
+
+  async save() {
+    this.saving = true; this.error = ''; this.success = '';
+    const body = { name: this.form.name, email: this.form.email };
+    if (this.form.new_password) {
+      if (this.form.new_password !== this.form.confirm_password) {
+        this.error = 'As senhas não coincidem'; this.saving = false; return;
+      }
+      body.new_password = this.form.new_password;
+      body.current_password = this.form.current_password;
+    }
+    try {
+      const r = await API.put('/api/auth/me', body);
+      if (r) {
+        const updated = { ...this.user, name: this.form.name, email: this.form.email };
+        Auth.setSession(Auth.getToken(), updated);
+        this.user = updated;
+        window.dispatchEvent(new CustomEvent('auth-user-updated'));
+        this.success = 'Perfil atualizado com sucesso!';
+        this.form.current_password = ''; this.form.new_password = ''; this.form.confirm_password = '';
+      } else { this.error = 'Erro ao salvar. Verifique os dados e tente novamente.'; }
+    } catch(e) { this.error = e.message || 'Erro ao salvar'; }
+    this.saving = false;
+  },
+
+}));
+
+
 }); // alpine:init
