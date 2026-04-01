@@ -166,8 +166,12 @@ Alpine.data('App', () => ({
     window.addEventListener('resize', () => { this.isMobile = window.innerWidth < 1024; });
     window.addEventListener('show-toast', e => this.addToast(e.detail));
     window.addEventListener('navigate', e => { if (e.detail?.page) this.navigate(e.detail.page); });
-    // Reset sidebar scroll to top on load
-    this.$nextTick(() => { document.querySelector('nav')?.scrollTo(0, 0); });
+    // Reset sidebar scroll to top on load (setTimeout needed — Alpine renders after nextTick)
+    this.$nextTick(() => {
+      document.querySelector('nav')?.scrollTo(0, 0);
+      setTimeout(() => { document.querySelector('nav')?.scrollTo(0, 0); }, 100);
+      setTimeout(() => { document.querySelector('nav')?.scrollTo(0, 0); }, 400);
+    });
     await this.$store.meta.refresh();
     const alerts = await API.get('/api/alerts');
     if (alerts) this.alertCount = alerts.filter(a => a.status === 'active').length;
