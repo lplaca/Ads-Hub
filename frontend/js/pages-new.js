@@ -1376,7 +1376,38 @@ _makePlaceholderPage('ProductCountriesPage','fas fa-flag',        '#f59e0b', 'Pr
 _makePlaceholderPage('GoogleConnectPage',  'fab fa-google',       '#4285f4', 'Google Ads API', 'Configure as credenciais da Google Ads API (Developer Token + OAuth2) para integração completa.', null, null);
 _makePlaceholderPage('ClickupIntPage',     'fas fa-circle-check', '#7b68ee', 'ClickUp', 'Importe tarefas e sincronize decisões do Gestor IA com o ClickUp.', null, null);
 _makePlaceholderPage('NotionIntPage',      'fas fa-n',            '#ffffff', 'Notion', 'Sincronize análises, produtos e resultados com bases Notion por projeto.', null, null);
-_makePlaceholderPage('AiIntPage',          'fas fa-robot',        '#a855f7', 'IA — Claude / ChatGPT', 'Configure as chaves de API para Claude (Anthropic) e OpenAI utilizadas no Gestor IA.', null, null);
+Alpine.data('AiIntPage', () => ({
+  form: { anthropic_api_key: '', openai_api_key: '' },
+  anthropicSet: false,
+  openaiSet: false,
+  saving: false,
+  saved: false,
+  error: '',
+
+  async init() {
+    const s = await API.get('/api/settings');
+    if (s) {
+      this.anthropicSet = s.anthropic_api_key_set === 'true';
+      this.openaiSet = s.openai_api_key_set === 'true';
+    }
+  },
+
+  async save() {
+    this.saving = true; this.saved = false; this.error = '';
+    const body = {};
+    if (this.form.anthropic_api_key.trim()) body.anthropic_api_key = this.form.anthropic_api_key.trim();
+    if (this.form.openai_api_key.trim()) body.openai_api_key = this.form.openai_api_key.trim();
+    if (!Object.keys(body).length) { this.error = 'Digite pelo menos uma chave para salvar.'; this.saving = false; return; }
+    const r = await API.post('/api/settings', body);
+    if (r) {
+      if (body.anthropic_api_key) { this.anthropicSet = true; this.form.anthropic_api_key = ''; }
+      if (body.openai_api_key) { this.openaiSet = true; this.form.openai_api_key = ''; }
+      this.saved = true;
+      setTimeout(() => { this.saved = false; }, 3000);
+    } else { this.error = 'Erro ao salvar. Tente novamente.'; }
+    this.saving = false;
+  },
+}));
 
 
 // ── Google Ads placeholder pages ──────────────────────────────────────────────
