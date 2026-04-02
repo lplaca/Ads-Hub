@@ -29,6 +29,17 @@ Alpine.data('ImportarPage', () => ({
   jobs: [],
   jobsLoading: false,
 
+  // Spreadsheet import
+  importFile: null,
+  importLoading: false,
+  importResult: null,
+  importError: '',
+  importSelectedRows: new Set(),
+  isDragging: false,
+  dryRunResult: null,
+  dryRunModal: false,
+  batchLaunching: false,
+
   async init() {
     await this.loadConfig()
     if (this.configSaved) {
@@ -215,6 +226,103 @@ Alpine.data('ImportarPage', () => ({
     return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'})
   },
 
+  // ── Spreadsheet import helpers ────────────────────────────────────────────
+  handleDrop(e) {
+    this.isDragging = false
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]
+    if (file) this.processImportFile(file)
+  },
+  handleFileSelect(e) {
+    const file = e.target.files && e.target.files[0]
+    if (file) this.processImportFile(file)
+    e.target.value = ''
+  },
+  async processImportFile(file) {
+    const name = (file.name || '').toLowerCase()
+    if (!name.endsWith('.csv') && !name.endsWith('.xlsx')) {
+      toast('error', 'Apenas arquivos .csv e .xlsx são aceitos')
+      return
+    }
+    this.importLoading = true
+    this.importError = ''
+    this.importResult = null
+    this.importSelectedRows = new Set()
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const resp = await fetch('/api/import/upload', { method: 'POST', body: fd })
+      const data = await resp.json()
+      if (!resp.ok) {
+        this.importError = data.detail || 'Erro ao processar arquivo'
+      } else {
+        this.importResult = data
+        this.importSelectedRows = new Set(
+          data.rows.filter(r => r.missing_fields.length === 0).map(r => r.row_index)
+        )
+      }
+    } catch(e) {
+      this.importError = 'Erro de conexão ao enviar arquivo'
+    }
+    this.importLoading = false
+  },
+  isRowSelected(ri) { return this.importSelectedRows.has(ri) },
+  toggleRow(ri) {
+    const s = new Set(this.importSelectedRows)
+    if (s.has(ri)) s.delete(ri) else s.add(ri)
+    this.importSelectedRows = s
+  },
+  get allRowsSelected() {
+    if (!this.importResult || !this.importResult.rows.length) return false
+    return this.importResult.rows.every(r => this.importSelectedRows.has(r.row_index))
+  },
+  toggleAllRows() {
+    if (this.allRowsSelected) {
+      this.importSelectedRows = new Set()
+    } else {
+      this.importSelectedRows = new Set((this.importResult ? this.importResult.rows : []).map(r => r.row_index))
+    }
+  },
+  get selectedValidRows() {
+    if (!this.importResult) return []
+    return this.importResult.rows.filter(r => this.importSelectedRows.has(r.row_index) && r.missing_fields.length === 0)
+  },
+  get selectedRowsCount() { return this.importSelectedRows.size },
+  get hasIncompleteSelected() {
+    if (!this.importResult) return false
+    return this.importResult.rows.some(r => this.importSelectedRows.has(r.row_index) && r.missing_fields.length > 0)
+  },
+  async runDryRun() {
+    if (!this.importResult) return
+    const rows = this.importResult.rows.filter(r => this.importSelectedRows.has(r.row_index))
+    if (!rows.length) { toast('warning', 'Nenhuma linha selecionada'); return }
+    this.batchLaunching = true
+    try {
+      const r = await API.post('/api/import/launch-batch', { rows, dry_run: true })
+      this.dryRunResult = r
+      this.dryRunModal = true
+    } catch(e) { toast('error', 'Erro ao executar teste') }
+    this.batchLaunching = false
+  },
+  async launchSelected() {
+    const rows = this.selectedValidRows
+    if (!rows.length) { toast('warning', 'Nenhuma linha válida selecionada'); return }
+    if (this.hasIncompleteSelected) { toast('error', 'Desmarque as linhas com campos obrigatórios ausentes antes de lançar'); return }
+    this.batchLaunching = true
+    try {
+      const r = await API.post('/api/import/launch-batch', { rows, dry_run: false })
+      const queued = (r.jobs || []).filter(j => j.status === 'queued').length
+      const errs   = (r.jobs || []).filter(j => j.status === 'error').length
+      toast('success', queued + ' campanha(s) enfileirada(s)' + (errs > 0 ? ' · ' + errs + ' erro(s)' : ''))
+      if (queued > 0) { this.tab = 'historico'; await this.loadJobs() }
+    } catch(e) { toast('error', 'Erro ao lançar: ' + (e.message || e)) }
+    this.batchLaunching = false
+  },
+  importRowBadge(row) {
+    if (row.missing_fields.length === 0)
+      return '<span class="px-2 py-0.5 rounded-full text-xs bg-green-600/20 text-green-400">Pronto</span>'
+    return '<span class="px-2 py-0.5 rounded-full text-xs bg-yellow-600/20 text-yellow-400" title="' + row.missing_fields.join(', ') + '">Incompleto: ' + row.missing_fields.join(', ') + '</span>'
+  },
+
   renderPage() {
     return `
 <div class="p-6 space-y-6">
@@ -252,6 +360,10 @@ Alpine.data('ImportarPage', () => ({
     <button @click="tab='historico'" :class="tab==='historico' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white'"
       class="px-4 py-2 rounded-lg text-sm font-medium transition-all">
       <i class="fas fa-history mr-1.5"></i>Histórico
+    </button>
+    <button @click="tab='planilha'" :class="tab==='planilha' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white'"
+      class="px-4 py-2 rounded-lg text-sm font-medium transition-all">
+      <i class="fas fa-table mr-1.5"></i>Importar Planilha
     </button>
   </div>
 
@@ -472,6 +584,153 @@ Alpine.data('ImportarPage', () => ({
         </div>
       </template>
     </div>
+  </div>
+  <!-- ── TAB: IMPORTAR PLANILHA ── -->
+  <div x-show="tab==='planilha'" class="space-y-5">
+
+    <!-- Upload zone -->
+    <div class="glass rounded-xl p-5 space-y-4">
+      <h3 class="text-white font-semibold"><i class="fas fa-table text-purple-400 mr-2"></i>Upload de Planilha</h3>
+      <div
+        @dragover.prevent="isDragging = true"
+        @dragleave.prevent="isDragging = false"
+        @drop.prevent="handleDrop($event)"
+        :class="isDragging ? 'border-purple-400 bg-purple-600/10' : 'border-gray-600 hover:border-gray-500 hover:bg-gray-800/30'"
+        class="border-2 border-dashed rounded-xl p-10 text-center transition-all cursor-pointer"
+        @click="$refs.importFileInput.click()">
+        <i class="fas fa-cloud-upload-alt text-4xl text-gray-500 mb-3" :class="isDragging ? 'text-purple-400' : ''"></i>
+        <p class="text-gray-300 font-medium" x-text="isDragging ? 'Solte o arquivo aqui' : 'Arraste e solte ou clique para selecionar'"></p>
+        <p class="text-gray-500 text-sm mt-1">Aceita .csv e .xlsx</p>
+      </div>
+      <input x-ref="importFileInput" type="file" accept=".csv,.xlsx" class="hidden" @change="handleFileSelect($event)" />
+
+      <div x-show="importLoading" class="flex items-center gap-3 text-blue-400 text-sm">
+        <i class="fas fa-spinner fa-spin"></i> Processando arquivo...
+      </div>
+      <div x-show="importError" class="flex items-start gap-2 text-red-400 text-sm bg-red-500/10 rounded-lg p-3">
+        <i class="fas fa-triangle-exclamation mt-0.5 flex-shrink-0"></i>
+        <span x-text="importError"></span>
+      </div>
+    </div>
+
+    <!-- Preview table -->
+    <div x-show="importResult && !importLoading" class="glass rounded-xl overflow-hidden">
+      <div class="px-5 py-4 border-b border-gray-700/50 flex items-center justify-between flex-wrap gap-2">
+        <div class="flex items-center gap-3">
+          <h3 class="text-white font-semibold">Pré-visualização</h3>
+          <span class="text-sm text-gray-400" x-text="(importResult?.total_rows || 0) + ' linhas detectadas'"></span>
+        </div>
+        <div class="text-xs text-gray-400 space-y-0.5">
+          <div>
+            <span class="text-green-400 font-medium" x-text="(importResult?.columns_mapped?.length || 0) + ' colunas mapeadas'"></span>:
+            <span x-text="(importResult?.columns_mapped || []).join(', ')"></span>
+          </div>
+          <div x-show="importResult?.columns_ignored?.length > 0" class="text-gray-600">
+            <span x-text="(importResult?.columns_ignored?.length || 0) + ' ignoradas'"></span>:
+            <span x-text="(importResult?.columns_ignored || []).join(', ')"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm min-w-[700px]">
+          <thead>
+            <tr class="border-b border-gray-700/50">
+              <th class="px-4 py-3 text-left w-8">
+                <input type="checkbox" :checked="allRowsSelected" @change="toggleAllRows()"
+                  class="rounded border-gray-600 text-purple-600 bg-gray-700" />
+              </th>
+              <th class="px-4 py-3 text-left text-gray-400 font-medium">Produto</th>
+              <th class="px-4 py-3 text-left text-gray-400 font-medium">Vídeos</th>
+              <th class="px-4 py-3 text-left text-gray-400 font-medium">Países</th>
+              <th class="px-4 py-3 text-left text-gray-400 font-medium">Budget/dia</th>
+              <th class="px-4 py-3 text-left text-gray-400 font-medium">Conta</th>
+              <th class="px-4 py-3 text-left text-gray-400 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="row in (importResult?.rows || [])" :key="row.row_index">
+              <tr class="border-b border-gray-700/20 hover:bg-gray-800/30 transition-colors"
+                :class="isRowSelected(row.row_index) ? 'bg-purple-600/5' : ''">
+                <td class="px-4 py-3">
+                  <input type="checkbox" :checked="isRowSelected(row.row_index)"
+                    @change="toggleRow(row.row_index)"
+                    class="rounded border-gray-600 text-purple-600 bg-gray-700" />
+                </td>
+                <td class="px-4 py-3 text-white font-medium" x-text="row.nome_produto || '—'"></td>
+                <td class="px-4 py-3 text-gray-400">
+                  <span class="px-2 py-0.5 rounded bg-gray-700 text-xs" x-text="(row.urls_videos || []).length + ' url(s)'"></span>
+                </td>
+                <td class="px-4 py-3 text-gray-400 text-xs" x-text="(row.paises || []).join(', ') || '—'"></td>
+                <td class="px-4 py-3 text-gray-400" x-text="'$' + (row.budget_diario_usd || 10).toFixed(2)"></td>
+                <td class="px-4 py-3 text-gray-500 font-mono text-xs" x-text="row.ad_account_id || '—'"></td>
+                <td class="px-4 py-3"><span x-html="importRowBadge(row)"></span></td>
+              </tr>
+              <!-- Warnings row -->
+              <tr x-show="row.warnings && row.warnings.length > 0" class="bg-yellow-500/5">
+                <td></td>
+                <td colspan="6" class="px-4 pb-2 text-xs text-yellow-400">
+                  <i class="fas fa-triangle-exclamation mr-1"></i>
+                  <span x-text="row.warnings.join(' · ')"></span>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Action panel -->
+    <div x-show="importResult && !importLoading" class="glass rounded-xl p-5">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="text-sm text-gray-400">
+          <span class="text-white font-semibold" x-text="selectedRowsCount"></span> linha(s) selecionada(s)
+          <span x-show="hasIncompleteSelected" class="text-yellow-400 ml-2">
+            <i class="fas fa-triangle-exclamation mr-1"></i>Algumas linhas têm campos obrigatórios ausentes
+          </span>
+        </div>
+        <div class="flex gap-2">
+          <button @click="runDryRun()" :disabled="batchLaunching || selectedRowsCount === 0"
+            class="btn-secondary flex items-center gap-2 text-sm disabled:opacity-50">
+            <i class="fas fa-flask" :class="batchLaunching ? 'fa-spin' : ''"></i>
+            Testar (Dry Run)
+          </button>
+          <button @click="launchSelected()"
+            :disabled="batchLaunching || selectedValidRows.length === 0 || hasIncompleteSelected"
+            class="btn-primary flex items-center gap-2 text-sm disabled:opacity-50">
+            <i class="fas fa-rocket" :class="batchLaunching ? 'fa-spin' : ''"></i>
+            Lançar Selecionados (<span x-text="selectedValidRows.length"></span>)
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /tab planilha -->
+
+</div>
+
+<!-- ── DRY RUN MODAL ── -->
+<div x-show="dryRunModal" x-transition class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+  <div class="glass rounded-2xl w-full max-w-2xl p-6 space-y-4 max-h-[80vh] flex flex-col">
+    <div class="flex items-center justify-between">
+      <h3 class="text-white font-bold text-lg"><i class="fas fa-flask text-blue-400 mr-2"></i>Resultado do Dry Run</h3>
+      <button @click="dryRunModal = false" class="text-gray-400 hover:text-white transition-colors"><i class="fas fa-times"></i></button>
+    </div>
+    <p class="text-gray-400 text-sm">O que seria criado para cada linha selecionada:</p>
+    <div class="overflow-y-auto flex-1 space-y-2">
+      <template x-for="job in (dryRunResult?.jobs || [])" :key="job.row_index">
+        <div class="bg-gray-800/60 rounded-lg p-3 text-sm">
+          <p class="text-white font-semibold" x-text="job.preview?.campaign_name || job.nome_produto"></p>
+          <div class="flex flex-wrap gap-3 mt-1.5 text-gray-400 text-xs">
+            <span><i class="fas fa-film mr-1"></i><span x-text="job.preview?.videos || 0"></span> vídeo(s)</span>
+            <span><i class="fas fa-globe mr-1"></i><span x-text="(job.preview?.countries || []).join(', ')"></span></span>
+            <span><i class="fas fa-dollar-sign mr-1"></i>$<span x-text="(job.preview?.budget_diario_usd || 10).toFixed(2)"></span>/dia</span>
+            <span><i class="fas fa-wallet mr-1"></i><span x-text="job.preview?.ad_account_id || '—'"></span></span>
+          </div>
+        </div>
+      </template>
+    </div>
+    <button @click="dryRunModal = false" class="btn-secondary w-full text-sm">Fechar</button>
   </div>
 </div>
 

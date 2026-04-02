@@ -405,6 +405,11 @@
           <div x-html="renderPage()"></div>
         </div>
 
+        <!-- LANÇAR VIA CHAT -->
+        <div x-show="currentPage === 'chat-launcher'" x-data="ChatLauncherPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
         <!-- IDEAS -->
         <div x-show="currentPage === 'ideas'" x-data="IdeasPage" x-init="init()">
           <div x-html="renderPage()"></div>
@@ -522,6 +527,11 @@
 
         <!-- INTEGRATIONS: Notion -->
         <div x-show="currentPage === 'notion-int'" x-data="NotionIntPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- ATIVOS CONECTADOS -->
+        <div x-show="currentPage === 'assets'" x-data="AssetsPage" x-init="init()">
           <div x-html="renderPage()"></div>
         </div>
 
@@ -841,6 +851,8 @@ document.addEventListener('alpine:init', () => {
 <script src="/static/js/pages-auth.js?v=2"></script>
 <script src="/static/js/pages-intel.js?v=2"></script>
 <script src="/static/js/pages-new.js?v=2"></script>
+<script src="/static/js/pages-assets.js?v=1"></script>
+<script src="/static/js/pages-chat-launcher.js?v=1"></script>
 
 </body>
 </html>

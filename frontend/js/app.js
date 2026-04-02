@@ -104,6 +104,7 @@ const NAV = [
   // ── Inteligência ──────────────────────────────────────────────────────────
   { id: 'agent',             label: 'Gestor IA',          icon: 'fas fa-robot',                subtitle: 'Agente autônomo de otimização',            group: 'intel', badge: 'IA' },
   { id: 'chat',              label: 'Chat IA',            icon: 'fas fa-comments',             subtitle: 'Conversa com o assistente IA',             group: 'intel' },
+  { id: 'chat-launcher',     label: 'Lançar via Chat',    icon: 'fas fa-message',              subtitle: 'Criar campanha em linguagem natural',      group: 'intel' },
   { id: 'alerts',            label: 'Alertas',            icon: 'fas fa-triangle-exclamation', subtitle: 'Alertas que exigem atenção',               group: 'intel', badge: 'alertCount' },
   { id: 'ai-rules',          label: 'Regras do Gestor',   icon: 'fas fa-sliders',              subtitle: 'Regras automáticas para o Gestor IA',      group: 'intel' },
   { id: 'intelligence',      label: 'Previsões',          icon: 'fas fa-chart-mixed',          subtitle: 'Forecast e análise de risco',              group: 'intel' },
@@ -122,6 +123,7 @@ const NAV = [
   { id: 'clickup-int',       label: 'ClickUp',            icon: 'fas fa-circle-check',         subtitle: 'Integração ClickUp',                       group: 'integrations' },
   { id: 'notion-int',        label: 'Notion',             icon: 'fas fa-n',                    subtitle: 'Integração Notion',                        group: 'integrations' },
   { id: 'ai-int',            label: 'IA (Claude/GPT)',    icon: 'fas fa-robot',                subtitle: 'Chaves de API para IA',                    group: 'integrations' },
+  { id: 'assets',            label: 'Ativos Conectados',  icon: 'fas fa-boxes-stacked',        subtitle: 'BMs, contas e páginas Meta vinculados',    group: 'integrations' },
 
   // ── Configurações ─────────────────────────────────────────────────────────
   { id: 'projects',          label: 'Projetos',           icon: 'fas fa-folder-open',          subtitle: 'Gerenciar projetos e clientes',            group: 'config' },
