@@ -217,7 +217,7 @@ Alpine.data('CriarCampanhaPage', () => ({
 
   toggleRowSelect(id) {
     const s = new Set(this.selectedRowIds)
-    if (s.has(id)) s.delete(id) else s.add(id)
+    if (s.has(id)) { s.delete(id) } else { s.add(id) }
     this.selectedRowIds = s
   },
 
@@ -427,7 +427,7 @@ Alpine.data('CriarCampanhaPage', () => ({
   isImportRowSelected(ri) { return this.importSelectedRows.has(ri) },
   toggleImportRow(ri) {
     const s = new Set(this.importSelectedRows)
-    if (s.has(ri)) s.delete(ri) else s.add(ri)
+    if (s.has(ri)) { s.delete(ri) } else { s.add(ri) }
     this.importSelectedRows = s
   },
   get importAllSelected() {
