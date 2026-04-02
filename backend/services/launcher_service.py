@@ -59,8 +59,11 @@ def create_full_campaign(job_id: str, product: dict, account: dict):
     act = f"act_{account['ad_account_id'].replace('act_', '')}"
     page_id = account.get("page_id", "")
     pixel_id = account.get("pixel_id", "")
-    video_urls = json.loads(product.get("urls_videos", "[]"))
-    countries = json.loads(product.get("paises", "[]")) or ["BR"]
+    # Accept both JSON strings (from DB) and plain lists (from direct callers)
+    _raw_videos = product.get("urls_videos", "[]")
+    video_urls = _raw_videos if isinstance(_raw_videos, list) else json.loads(_raw_videos)
+    _raw_paises = product.get("paises", "[]")
+    countries = (_raw_paises if isinstance(_raw_paises, list) else json.loads(_raw_paises)) or ["BR"]
     nome = product.get("nome_produto", "Produto")
     budget_cents = int(float(product.get("budget_diario_usd", 10.0)) * 100)
     cta = CTA_MAP.get(product.get("cta", "SHOP_NOW").upper(), "SHOP_NOW")
@@ -212,17 +215,19 @@ def create_full_campaign(job_id: str, product: dict, account: dict):
         _db_update_job(job_id, status="completed", step="done",
                        step_detail=f"Concluído! {len(ad_ids)} anúncios criados.",
                        ad_ids=json.dumps(ad_ids), completed_at=datetime.now().isoformat())
-        # Update product status
-        conn = get_db()
-        conn.execute("UPDATE imported_products SET launch_status='launched' WHERE id=?", (product["id"],))
-        conn.commit()
-        conn.close()
+        # Update product status (only when the product has a DB id)
+        if product.get("id"):
+            conn = get_db()
+            conn.execute("UPDATE imported_products SET launch_status='launched' WHERE id=?", (product["id"],))
+            conn.commit()
+            conn.close()
 
     except Exception as ex:
         _db_update_job(job_id, status="failed", step="error",
                        step_detail=str(ex), error=str(ex),
                        completed_at=datetime.now().isoformat())
-        conn = get_db()
-        conn.execute("UPDATE imported_products SET launch_status='failed' WHERE id=?", (product["id"],))
-        conn.commit()
-        conn.close()
+        if product.get("id"):
+            conn = get_db()
+            conn.execute("UPDATE imported_products SET launch_status='failed' WHERE id=?", (product["id"],))
+            conn.commit()
+            conn.close()
