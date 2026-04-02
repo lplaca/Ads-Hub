@@ -535,6 +535,16 @@
           <div x-html="renderPage()"></div>
         </div>
 
+        <!-- META: CRIAR CAMPANHA -->
+        <div x-show="currentPage === 'criar-campanha'" x-data="CriarCampanhaPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
+        <!-- GOOGLE: CRIAR CAMPANHA (reusa o mesmo componente, plataforma = google) -->
+        <div x-show="currentPage === 'google-criar'" x-data="CriarCampanhaPage" x-init="init()">
+          <div x-html="renderPage()"></div>
+        </div>
+
         <!-- INTEGRATIONS: AI -->
         <div x-show="currentPage === 'ai-int'" x-data="AiIntPage" x-init="init()" class="p-6 max-w-2xl">
           <div class="mb-6 flex items-center gap-3">
@@ -853,6 +863,7 @@ document.addEventListener('alpine:init', () => {
 <script src="/static/js/pages-new.js?v=2"></script>
 <script src="/static/js/pages-assets.js?v=1"></script>
 <script src="/static/js/pages-chat-launcher.js?v=1"></script>
+<script src="/static/js/pages-criar-campanha.js?v=1"></script>
 
 </body>
 </html>

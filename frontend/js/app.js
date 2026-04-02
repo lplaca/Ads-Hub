@@ -85,6 +85,7 @@ const NAV = [
   { id: 'meta-countries',    label: 'Países',             icon: 'fas fa-globe',                subtitle: 'Segmentação e performance por país',       group: 'meta' },
   { id: 'rules',             label: 'Regras',             icon: 'fas fa-shield-halved',        subtitle: 'Automações e regras de otimização',        group: 'meta' },
   { id: 'quickactions',      label: 'Ações em Massa',     icon: 'fas fa-bolt',                 subtitle: 'Editar múltiplas campanhas de uma vez',    group: 'meta' },
+  { id: 'criar-campanha',    label: 'Criar Campanha',     icon: 'fas fa-plus-circle',          subtitle: 'Lançar novas campanhas Meta Ads',          group: 'meta', badge: 'Novo' },
 
   // ── Google Ads ────────────────────────────────────────────────────────────
   { id: 'google-overview',   label: 'Visão Geral',        icon: 'fas fa-chart-pie',            subtitle: 'Overview das métricas Google Ads',         group: 'google' },
@@ -94,6 +95,7 @@ const NAV = [
   { id: 'google-ads',        label: 'Anúncios',           icon: 'fas fa-rectangle-ad',         subtitle: 'Criativos Google Ads',                     group: 'google' },
   { id: 'google-keywords',   label: 'Palavras-chave',     icon: 'fas fa-key',                  subtitle: 'Gestão de keywords',                       group: 'google' },
   { id: 'google-analytics',  label: 'Análises',           icon: 'fas fa-chart-line',           subtitle: 'Relatórios Google Ads',                    group: 'google' },
+  { id: 'google-criar',      label: 'Criar Campanha',     icon: 'fas fa-plus-circle',          subtitle: 'Lançar novas campanhas Google Ads',        group: 'google', badge: 'Novo' },
 
   // ── Produtos ──────────────────────────────────────────────────────────────
   { id: 'products',          label: 'Todos os Produtos',  icon: 'fas fa-box',                  subtitle: 'Catálogo completo de produtos',            group: 'products' },
