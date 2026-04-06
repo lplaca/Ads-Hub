@@ -576,6 +576,8 @@ Alpine.data('QuickActionsPage', function() {
     search: '',
     filterStatus: '',
     loading: false,
+    emptyReason: '',
+    emptyMessage: '',
 
     async init() {
       await this.loadCampaigns();
@@ -583,8 +585,20 @@ Alpine.data('QuickActionsPage', function() {
     },
 
     async loadCampaigns() {
+      this.loading = true;
+      this.emptyReason = '';
+      this.emptyMessage = '';
       const data = await API.get('/api/campaigns');
-      if (data) this.campaigns = data;
+      if (Array.isArray(data)) {
+        this.campaigns = data;
+      } else if (data && data.empty_reason) {
+        this.campaigns = [];
+        this.emptyReason = data.empty_reason;
+        this.emptyMessage = data.message;
+      } else if (data) {
+        this.campaigns = data;
+      }
+      this.loading = false;
     },
 
     get filtered() {
@@ -1947,10 +1961,33 @@ quickActions(s) {
           </div>
         </div>
       </template>
-      <template x-if="filtered.length===0">
+      <template x-if="filtered.length===0 && !emptyReason">
         <div class="p-10 text-center text-slate-500">
           <i class="fas fa-bolt text-4xl mb-3 block"></i>
           Nenhuma campanha encontrada.
+        </div>
+      </template>
+
+      <!-- Empty state orientado: quando não há contas/conexões -->
+      <template x-if="emptyReason">
+        <div class="p-8 flex flex-col items-center justify-center gap-4">
+          <div class="w-16 h-16 rounded-2xl flex items-center justify-center"
+            :style="emptyReason==='no_project' ? 'background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.2)' : 'background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2)'">
+            <i class="text-2xl fas"
+              :class="emptyReason==='no_project' ? 'fa-folder-open text-amber-400' : emptyReason==='no_connection' ? 'fa-plug text-blue-400' : 'fa-rotate text-green-400'"></i>
+          </div>
+          <div class="text-center">
+            <p class="text-white font-semibold mb-1" x-text="emptyMessage"></p>
+            <p class="text-slate-500 text-sm" x-show="emptyReason==='no_connection'">Vá em <strong class="text-blue-400">Integrações → Conexões</strong> para adicionar seu token Meta Ads.</p>
+            <p class="text-slate-500 text-sm" x-show="emptyReason==='token_not_synced'">Vá em <strong class="text-green-400">Integrações → Conexões</strong> e clique em <strong class="text-green-400">Sincronizar Contas</strong> em cada token.</p>
+          </div>
+          <button x-show="emptyReason==='no_connection' || emptyReason==='token_not_synced'"
+            @click="$dispatch('navigate', {page: 'connections'})"
+            class="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:scale-105"
+            style="background:linear-gradient(135deg,#2563eb,#7c3aed);">
+            <i class="fas fa-plug text-sm"></i>
+            Ir para Conexões
+          </button>
         </div>
       </template>
     </div>

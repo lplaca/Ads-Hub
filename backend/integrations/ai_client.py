@@ -193,11 +193,25 @@ def get_campaigns_for_agent() -> tuple:
 def run_ai_cycle_logic(api_key: str) -> dict:
     """Core AI analysis cycle: call Claude and optionally execute actions."""
     from backend.integrations.meta_client import pause_meta_campaign
+    from backend.core.settings import get_active_project_id
     import uuid
+    active_pid = get_active_project_id()
+    if not active_pid:
+        return {
+            "error": "no_active_project",
+            "message": "Nenhum projeto ativo para analisar. Selecione um projeto.",
+            "cycle_id": None, "analysis": None, "actions_taken": 0, "campaigns_analyzed": 0
+        }
     products = get_db_products()
     knowledge = get_db_knowledge()
     autonomy = int(get_agent_config("autonomy_level", "1"))
     campaigns, is_demo = get_campaigns_for_agent()
+    if not campaigns and not is_demo:
+        return {
+            "error": "no_campaigns",
+            "message": "Nenhuma campanha disponível. Verifique se as conexões Meta Ads estão sincronizadas.",
+            "cycle_id": None, "analysis": None, "actions_taken": 0, "campaigns_analyzed": 0
+        }
 
     system_prompt = build_agent_system_prompt(products, knowledge, autonomy)
 

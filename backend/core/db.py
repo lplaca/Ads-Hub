@@ -339,6 +339,7 @@ def init_db():
         "ALTER TABLE rules ADD COLUMN last_run TIMESTAMP",
         "ALTER TABLE business_managers ADD COLUMN project_id TEXT DEFAULT ''",
         "ALTER TABLE ad_accounts ADD COLUMN project_id TEXT DEFAULT ''",
+        "ALTER TABLE api_connections ADD COLUMN project_id TEXT DEFAULT ''",
         "ALTER TABLE projects ADD COLUMN notion_token TEXT DEFAULT ''",
         "ALTER TABLE projects ADD COLUMN notion_analyses_db_id TEXT DEFAULT ''",
         "ALTER TABLE projects ADD COLUMN notion_products_db_id TEXT DEFAULT ''",
