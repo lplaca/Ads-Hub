@@ -2,9 +2,9 @@
 API Connections and Live Poll routes.
 """
 import json, uuid
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from backend.core.db import get_db
-from backend.core.settings import _get_active_accounts
+from backend.core.settings import _get_active_accounts, get_active_project_id
 from backend.integrations.meta_client import meta_get, fetch_meta_campaigns
 from backend.domains.accounts import _EMPTY_METRICS, _fetch_account_insights
 
@@ -37,10 +37,69 @@ def _build_caps(token: str, account_id: str, token_type: str) -> tuple:
     return user_name, user_id, caps
 
 
+def _auto_sync_accounts_from_token(conn, connection_id: str, token: str, bm_id: str, project_id: str):
+    """
+    Busca contas de anúncio vinculadas ao token na Meta API e as insere em ad_accounts.
+    Se bm_id fornecido, insere em business_managers e faz sync completo.
+    """
+    from backend.services.sync_service import _sync_bm_accounts
+
+    # 1. Se tem BM, usar sync de BM (já popula ad_accounts)
+    if bm_id:
+        existing_bm = conn.execute(
+            "SELECT id FROM business_managers WHERE bm_id=? AND project_id=?",
+            (bm_id, project_id)
+        ).fetchone()
+        if not existing_bm:
+            bm_row_id = str(uuid.uuid4())
+            conn.execute(
+                "INSERT INTO business_managers (id, name, bm_id, access_token, project_id) VALUES (?,?,?,?,?)",
+                (bm_row_id, f"BM {bm_id}", bm_id, token, project_id)
+            )
+            conn.commit()
+        else:
+            bm_row_id = existing_bm["id"]
+        try:
+            _sync_bm_accounts(bm_row_id, bm_id, token, conn, project_id)
+        except Exception:
+            pass
+        return
+
+    # 2. Sem BM: buscar /me/adaccounts diretamente
+    result = meta_get("me/adaccounts", token, {
+        "fields": "id,name,account_status,currency",
+        "limit": 50
+    })
+    accounts = result.get("data", [])
+    for acc in accounts:
+        act_id = acc["id"]  # já vem com "act_" prefixo
+        existing = conn.execute(
+            "SELECT id FROM ad_accounts WHERE account_id=?", (act_id,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE ad_accounts SET project_id=?, access_token=? WHERE account_id=? AND (project_id='' OR project_id IS NULL)",
+                (project_id, token, act_id)
+            )
+        else:
+            conn.execute(
+                "INSERT INTO ad_accounts (id, name, account_id, bm_id, country, access_token, status, project_id) VALUES (?,?,?,?,?,?,?,?)",
+                (str(uuid.uuid4()), acc.get("name", act_id), act_id, "", "", token, "active", project_id)
+            )
+    conn.commit()
+
+
 @router.get("/api/connections")
 def list_connections():
     conn = get_db()
-    rows = conn.execute("SELECT * FROM api_connections ORDER BY created_at DESC").fetchall()
+    active = get_active_project_id()
+    if active:
+        rows = conn.execute(
+            "SELECT * FROM api_connections WHERE project_id=? ORDER BY created_at DESC",
+            (active,)
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM api_connections ORDER BY created_at DESC").fetchall()
     conn.close()
     result = []
     for r in rows:
@@ -73,7 +132,6 @@ def verify_connection(data: dict):
 
 @router.post("/api/connections")
 def add_connection(data: dict):
-    from fastapi import HTTPException
     token = data.get("token", "")
     if not token or not data.get("name"):
         raise HTTPException(400, "name e token são obrigatórios")
@@ -85,17 +143,53 @@ def add_connection(data: dict):
         u, uid, caps = _build_caps(token, data.get("account_id", ""), data.get("token_type", "full"))
         user_name = u or ""
         user_id = uid or ""
+    project_id = data.get("project_id") or get_active_project_id()
     cid = str(uuid.uuid4())
     conn = get_db()
     conn.execute(
-        "INSERT INTO api_connections (id, name, token, token_type, account_id, bm_id, user_name, user_id, capabilities) VALUES (?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO api_connections (id, name, token, token_type, account_id, bm_id, user_name, user_id, capabilities, project_id) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (cid, data["name"], token, data.get("token_type", "full"),
          data.get("account_id", ""), data.get("bm_id", ""),
-         user_name, user_id, json.dumps(caps))
+         user_name, user_id, json.dumps(caps), project_id)
     )
     conn.commit()
+    # Auto-sync: buscar contas do token e popular ad_accounts
+    try:
+        _auto_sync_accounts_from_token(
+            conn,
+            connection_id=cid,
+            token=token,
+            bm_id=data.get("bm_id", ""),
+            project_id=project_id
+        )
+    except Exception:
+        pass  # sync falhou, mas conexão foi salva
     conn.close()
-    return {"id": cid, "status": "success", "message": "Conexão adicionada com sucesso!"}
+    return {"id": cid, "status": "success", "message": "Conexão adicionada e contas sincronizadas!"}
+
+
+@router.post("/api/connections/{conn_id}/sync-accounts")
+def sync_connection_accounts(conn_id: str):
+    """Re-sincroniza as contas de anúncios de uma conexão específica."""
+    conn = get_db()
+    row = conn.execute("SELECT * FROM api_connections WHERE id=?", (conn_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, "Conexão não encontrada")
+    d = dict(row)
+    try:
+        _auto_sync_accounts_from_token(
+            conn, conn_id, d["token"], d.get("bm_id", ""), d.get("project_id", "")
+        )
+        project_id = d.get("project_id", "")
+        count = conn.execute(
+            "SELECT COUNT(*) FROM ad_accounts WHERE project_id=?", (project_id,)
+        ).fetchone()[0]
+        conn.close()
+        return {"ok": True, "accounts_synced": count, "message": f"{count} conta(s) disponível(is) para este projeto"}
+    except Exception as e:
+        conn.close()
+        raise HTTPException(500, str(e))
 
 
 @router.delete("/api/connections/{conn_id}")
@@ -111,7 +205,14 @@ def delete_connection(conn_id: str):
 def get_aggregate_capabilities():
     """Returns aggregate of all capabilities across all connections."""
     conn = get_db()
-    rows = conn.execute("SELECT capabilities, token_type FROM api_connections WHERE status='active'").fetchall()
+    active = get_active_project_id()
+    if active:
+        rows = conn.execute(
+            "SELECT capabilities, token_type FROM api_connections WHERE status='active' AND project_id=?",
+            (active,)
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT capabilities, token_type FROM api_connections WHERE status='active'").fetchall()
     conn.close()
     caps = set()
     has_full = False
@@ -169,7 +270,6 @@ def clickup_workspaces():
     from backend.integrations.clickup_client import get_workspaces
     token = get_setting("clickup_token", "")
     if not token:
-        from fastapi import HTTPException
         raise HTTPException(400, "Token ClickUp não configurado")
     return get_workspaces(token)
 
@@ -186,7 +286,6 @@ def clickup_lists(space_id: str):
 def clickup_create_task(data: dict):
     from backend.core.settings import get_setting
     from backend.integrations.clickup_client import create_task
-    from fastapi import HTTPException
     token = get_setting("clickup_token", "")
     if not token:
         raise HTTPException(400, "Token ClickUp não configurado")

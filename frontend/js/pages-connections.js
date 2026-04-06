@@ -26,6 +26,7 @@ Alpine.data('ConnectionsPage', function() {
     saving: false,
     showToken: false,
     deleteConfirm: null,
+    syncingId: null,
 
     async init() {
       await this.load();
@@ -75,10 +76,11 @@ Alpine.data('ConnectionsPage', function() {
       }
       this.saving = true;
       try {
+        const activeProject = window._activeProjectId || '';
         const r = await fetch('/api/connections', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...this.form, verified_data: this.verified }),
+          body: JSON.stringify({ ...this.form, verified_data: this.verified, project_id: activeProject }),
         });
         const d = await r.json();
         if (d.status === 'success') {
@@ -99,6 +101,22 @@ Alpine.data('ConnectionsPage', function() {
       await fetch(`/api/connections/${id}`, { method: 'DELETE' });
       this.$dispatch('show-toast', {type:'success', message:'Conexão removida.'});
       await this.load();
+    },
+
+    async syncAccounts(id) {
+      this.syncingId = id;
+      try {
+        const r = await fetch(`/api/connections/${id}/sync-accounts`, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) {
+          this.$dispatch('show-toast', {type:'success', message: d.message});
+        } else {
+          this.$dispatch('show-toast', {type:'error', message: d.detail || 'Erro ao sincronizar.'});
+        }
+      } catch(e) {
+        this.$dispatch('show-toast', {type:'error', message:'Erro de conexão.'});
+      }
+      this.syncingId = null;
     },
 
     closeModal() {
@@ -185,9 +203,19 @@ window.TPL_CONNECTIONS = function(c) {
 
           <div class="flex items-center justify-between">
             <p class="text-xs text-slate-600"><i class="fas fa-clock mr-1"></i>${conn.created_at ? conn.created_at.slice(0,10) : ''}</p>
-            <div class="flex items-center gap-1.5">
-              <div class="w-1.5 h-1.5 rounded-full bg-green-400"></div>
-              <span class="text-xs text-green-400 font-medium">Ativa</span>
+            <div class="flex items-center gap-2">
+              <button @click="syncAccounts('${conn.id}')"
+                :disabled="syncingId === '${conn.id}'"
+                class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
+                :class="syncingId === '${conn.id}' ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105'"
+                style="background:rgba(34,197,94,0.1);color:#4ade80;border:1px solid rgba(34,197,94,0.2);">
+                <i class="fas text-xs" :class="syncingId === '${conn.id}' ? 'fa-circle-notch fa-spin' : 'fa-rotate'"></i>
+                <span x-text="syncingId === '${conn.id}' ? 'Sincronizando...' : 'Sincronizar Contas'"></span>
+              </button>
+              <div class="flex items-center gap-1.5">
+                <div class="w-1.5 h-1.5 rounded-full bg-green-400"></div>
+                <span class="text-xs text-green-400 font-medium">Ativa</span>
+              </div>
             </div>
           </div>
 

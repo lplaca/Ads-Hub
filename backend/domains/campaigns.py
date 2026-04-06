@@ -4,7 +4,7 @@ Campaigns domain routes.
 from typing import Optional
 from fastapi import APIRouter
 from backend.core.db import get_db
-from backend.core.settings import _get_active_accounts
+from backend.core.settings import _get_active_accounts, get_active_project_id
 from backend.integrations.meta_client import fetch_meta_campaigns, fetch_meta_insights, pause_meta_campaign, activate_meta_campaign
 from backend.domains.accounts import _EMPTY_METRICS
 
@@ -15,9 +15,23 @@ router = APIRouter()
 def list_campaigns(status: Optional[str] = None, period: str = "last_7d"):
     conn = get_db()
     accounts = _get_active_accounts(conn)
-    conn.close()
+    active_pid = get_active_project_id()
     if not accounts:
-        return []
+        if not active_pid:
+            conn.close()
+            return {"data": [], "empty_reason": "no_project", "message": "Nenhum projeto ativo. Selecione ou crie um projeto."}
+        connections = conn.execute(
+            "SELECT COUNT(*) FROM api_connections WHERE project_id=?", (active_pid,)
+        ).fetchone()[0]
+        all_accounts = conn.execute("SELECT COUNT(*) FROM ad_accounts").fetchone()[0]
+        conn.close()
+        if connections > 0 and all_accounts == 0:
+            return {"data": [], "empty_reason": "token_not_synced", "message": "Token conectado mas contas não sincronizadas. Vá em Conexões e clique em 'Sincronizar Contas'."}
+        elif connections == 0:
+            return {"data": [], "empty_reason": "no_connection", "message": "Nenhuma conexão Meta Ads configurada. Vá em Integrações → Conexões para adicionar um token."}
+        else:
+            return {"data": [], "empty_reason": "no_accounts", "message": "Nenhuma conta de anúncios vinculada a este projeto."}
+    conn.close()
     # Real accounts: fetch from Meta
     all_campaigns = []
     for acc in accounts:
